@@ -19,7 +19,6 @@ export default function Arbitrage() {
     { id: 1, name: 'Team A', odds: '', stake: '100' },
     { id: 2, name: 'Team B', odds: '', stake: '100' },
   ])
-  const [nextId, setNextId] = useState(3)
 
   const decimals = outcomes.map(o => toDecimal(o.odds, oddsFormat))
   const allOddsValid = decimals.every(d => d !== null)
@@ -71,16 +70,6 @@ export default function Arbitrage() {
     }
   }
 
-  function addOutcome() {
-    const letter = String.fromCharCode(64 + outcomes.length + 1)
-    setOutcomes(prev => [...prev, { id: nextId, name: `Team ${letter}`, odds: '', stake: '100' }])
-    setNextId(n => n + 1)
-  }
-
-  function removeOutcome(id) {
-    if (outcomes.length <= 2) return
-    setOutcomes(prev => prev.filter(o => o.id !== id))
-  }
 
   const gridCols = `110px repeat(${outcomes.length}, 1fr)`
 
@@ -117,7 +106,6 @@ export default function Arbitrage() {
             <input type="number" value={bankroll} placeholder="1000" min="1" style={{ width: 110 }} onChange={e => setBankroll(e.target.value)} />
           </div>
         )}
-        <button className="btn btn-sm btn-outline" onClick={addOutcome} style={{ marginLeft: 'auto' }}>+ Add Outcome</button>
       </div>
 
       {/* Banner */}
@@ -146,11 +134,8 @@ export default function Arbitrage() {
                 type="text"
                 value={o.name}
                 onChange={e => updateName(o.id, e.target.value)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px', width: outcomes.length > 2 ? 'calc(100% - 22px)' : '100%', outline: 'none', padding: 0 }}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px', width: '100%', outline: 'none', padding: 0 }}
               />
-              {outcomes.length > 2 && (
-                <button className="col-remove" onClick={() => removeOutcome(o.id)} title="Remove">×</button>
-              )}
             </div>
           ))}
         </div>
