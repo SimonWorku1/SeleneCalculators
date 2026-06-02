@@ -267,6 +267,7 @@ let outcomes = [
   { id: 2, name: 'Team B' },
 ];
 let nextId = 3;
+let lastChangedStakeId = null;
 
 /* ── Format helpers ── */
 function toDecimal(val) {
@@ -311,6 +312,7 @@ function setStakeMode(mode) {
 
 function addOutcome() {
   outcomes.push({ id: nextId++, name: `Team ${String.fromCharCode(64 + outcomes.length + 1)}` });
+  lastChangedStakeId = null;
   renderGrid();
   calculate();
 }
@@ -318,6 +320,7 @@ function addOutcome() {
 function removeOutcome(id) {
   if (outcomes.length <= 2) return;
   outcomes = outcomes.filter(o => o.id !== id);
+  if (lastChangedStakeId === id) lastChangedStakeId = null;
   renderGrid();
   calculate();
 }
@@ -357,7 +360,7 @@ function renderGrid() {
           placeholder="100"
           value="100"
           ${stakeMode === 'auto' ? 'readonly' : ''}
-          oninput="calculate()">
+          oninput="onStakeInput(${o.id})">
       </div>
     </div>
   `).join('');
@@ -414,6 +417,11 @@ function renderGrid() {
   `;
 }
 
+function onStakeInput(id) {
+  lastChangedStakeId = id;
+  calculate();
+}
+
 /* ── Calculate ── */
 function calculate() {
   const n = outcomes.length;
@@ -439,7 +447,24 @@ function calculate() {
       if (inp) inp.value = stakes[i].toFixed(2);
     });
   } else {
-    stakes = outcomes.map(o => parseFloat(document.getElementById(`stake-${o.id}`)?.value) || 0);
+    // If a specific stake was changed, backfill the others to equalize payouts
+    const anchorIdx = lastChangedStakeId !== null
+      ? outcomes.findIndex(o => o.id === lastChangedStakeId)
+      : -1;
+
+    if (anchorIdx !== -1) {
+      const anchorStake = parseFloat(document.getElementById(`stake-${outcomes[anchorIdx].id}`)?.value) || 0;
+      const targetPayout = anchorStake * decimals[anchorIdx];
+      stakes = outcomes.map((o, i) => {
+        if (i === anchorIdx) return anchorStake;
+        const computed = targetPayout / decimals[i];
+        const inp = document.getElementById(`stake-${o.id}`);
+        if (inp) inp.value = computed.toFixed(2);
+        return computed;
+      });
+    } else {
+      stakes = outcomes.map(o => parseFloat(document.getElementById(`stake-${o.id}`)?.value) || 0);
+    }
   }
 
   const payouts = outcomes.map((o, i) => stakes[i] * decimals[i]);
