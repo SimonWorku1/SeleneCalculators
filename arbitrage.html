@@ -343,8 +343,7 @@ function renderGrid() {
     <div class="arb-cell" style="grid-column:${i + 2};">
       <input type="number" class="odds-inp"
         id="odds-${o.id}"
-        placeholder="${oddsFormat === 'american' ? '+110' : '2.10'}"
-        oninput="calculate()">
+        placeholder="${oddsFormat === 'american' ? '+110' : '2.10'}">
     </div>
   `).join('');
 
@@ -356,8 +355,7 @@ function renderGrid() {
           id="stake-${o.id}"
           placeholder="100"
           value="100"
-          ${stakeMode === 'auto' ? 'readonly' : ''}
-          oninput="onStakeInput(${o.id})">
+          ${stakeMode === 'auto' ? 'readonly' : ''}>
       </div>
     </div>
   `).join('');
@@ -412,6 +410,12 @@ function renderGrid() {
       </div>
     </div>
   `;
+
+  // Attach event listeners after innerHTML is set
+  outcomes.forEach(o => {
+    document.getElementById(`odds-${o.id}`).addEventListener('input', calculate);
+    document.getElementById(`stake-${o.id}`).addEventListener('input', () => onStakeInput(o.id));
+  });
 }
 
 function onStakeInput(anchorId) {
