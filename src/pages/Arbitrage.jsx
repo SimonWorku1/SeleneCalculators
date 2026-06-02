@@ -14,7 +14,7 @@ function fmt(n) { return n.toFixed(2) }
 export default function Arbitrage() {
   const [oddsFormat, setOddsFormat] = useState('american')
   const [stakeMode, setStakeMode] = useState('manual')
-  const [bankroll, setBankroll] = useState(1000)
+  const [bankroll, setBankroll] = useState('1000')
   const [outcomes, setOutcomes] = useState([
     { id: 1, name: 'Team A', odds: '', stake: '100' },
     { id: 2, name: 'Team B', odds: '', stake: '100' },
@@ -29,7 +29,7 @@ export default function Arbitrage() {
   if (stakeMode === 'auto' && allOddsValid) {
     const impliedProbs = decimals.map(d => 1 / d)
     const totalImplied = impliedProbs.reduce((a, b) => a + b, 0)
-    stakes = impliedProbs.map(p => bankroll * p / totalImplied)
+    stakes = impliedProbs.map(p => (parseFloat(bankroll) || 0) * p / totalImplied)
   } else {
     stakes = outcomes.map(o => parseFloat(o.stake) || 0)
   }
@@ -114,7 +114,7 @@ export default function Arbitrage() {
         {stakeMode === 'auto' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <label style={{ margin: 0 }}>Bankroll $</label>
-            <input type="number" value={bankroll} placeholder="1000" min="1" style={{ width: 110 }} onChange={e => setBankroll(parseFloat(e.target.value) || 1000)} />
+            <input type="number" value={bankroll} placeholder="1000" min="1" style={{ width: 110 }} onChange={e => setBankroll(e.target.value)} />
           </div>
         )}
         <button className="btn btn-sm btn-outline" onClick={addOutcome} style={{ marginLeft: 'auto' }}>+ Add Outcome</button>
