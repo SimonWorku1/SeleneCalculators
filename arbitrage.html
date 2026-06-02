@@ -267,7 +267,6 @@ let outcomes = [
   { id: 2, name: 'Team B' },
 ];
 let nextId = 3;
-let lastChangedStakeId = null;
 
 /* ── Format helpers ── */
 function toDecimal(val) {
@@ -312,7 +311,6 @@ function setStakeMode(mode) {
 
 function addOutcome() {
   outcomes.push({ id: nextId++, name: `Team ${String.fromCharCode(64 + outcomes.length + 1)}` });
-  lastChangedStakeId = null;
   renderGrid();
   calculate();
 }
@@ -320,7 +318,6 @@ function addOutcome() {
 function removeOutcome(id) {
   if (outcomes.length <= 2) return;
   outcomes = outcomes.filter(o => o.id !== id);
-  if (lastChangedStakeId === id) lastChangedStakeId = null;
   renderGrid();
   calculate();
 }
@@ -417,8 +414,22 @@ function renderGrid() {
   `;
 }
 
-function onStakeInput(id) {
-  lastChangedStakeId = id;
+function onStakeInput(anchorId) {
+  // Autofill all other stakes to equalize payouts (maximizes guaranteed profit)
+  const decimals = outcomes.map(o => toDecimal(parseFloat(document.getElementById(`odds-${o.id}`)?.value)));
+  if (decimals.every(d => d !== null)) {
+    const anchorIdx = outcomes.findIndex(o => o.id === anchorId);
+    const anchorVal = parseFloat(document.getElementById(`stake-${anchorId}`)?.value);
+    if (!isNaN(anchorVal) && anchorVal >= 0) {
+      const targetPayout = anchorVal * decimals[anchorIdx];
+      outcomes.forEach((o, i) => {
+        if (i !== anchorIdx) {
+          const inp = document.getElementById(`stake-${o.id}`);
+          if (inp) inp.value = (targetPayout / decimals[i]).toFixed(2);
+        }
+      });
+    }
+  }
   calculate();
 }
 
@@ -447,24 +458,7 @@ function calculate() {
       if (inp) inp.value = stakes[i].toFixed(2);
     });
   } else {
-    // If a specific stake was changed, backfill the others to equalize payouts
-    const anchorIdx = lastChangedStakeId !== null
-      ? outcomes.findIndex(o => o.id === lastChangedStakeId)
-      : -1;
-
-    if (anchorIdx !== -1) {
-      const anchorStake = parseFloat(document.getElementById(`stake-${outcomes[anchorIdx].id}`)?.value) || 0;
-      const targetPayout = anchorStake * decimals[anchorIdx];
-      stakes = outcomes.map((o, i) => {
-        if (i === anchorIdx) return anchorStake;
-        const computed = targetPayout / decimals[i];
-        const inp = document.getElementById(`stake-${o.id}`);
-        if (inp) inp.value = computed.toFixed(2);
-        return computed;
-      });
-    } else {
-      stakes = outcomes.map(o => parseFloat(document.getElementById(`stake-${o.id}`)?.value) || 0);
-    }
+    stakes = outcomes.map(o => parseFloat(document.getElementById(`stake-${o.id}`)?.value) || 0);
   }
 
   const payouts = outcomes.map((o, i) => stakes[i] * decimals[i]);
@@ -482,18 +476,20 @@ function calculate() {
   // Footer
   document.getElementById('footTotalStake').textContent = `$${fmtMoney(totalStake)}`;
   document.getElementById('footTotalPayout').textContent = `$${fmtMoney(guaranteedPayout)}`;
-  document.getElementById('footProfitLabel').textContent = `${isArb ? 'Profit' : 'Loss'} (${roiPct.toFixed(2)}%)`;
+  const hasProfit = isArb && profit > 0;
+
+  document.getElementById('footProfitLabel').textContent = `${hasProfit ? 'Profit' : 'Loss'} (${roiPct.toFixed(2)}%)`;
 
   const profitEl = document.getElementById('footProfit');
   profitEl.textContent = `${profit >= 0 ? '+' : ''}$${fmtMoney(profit)}`;
-  profitEl.style.color = isArb ? 'var(--accent-green)' : 'var(--accent-red)';
+  profitEl.style.color = hasProfit ? 'var(--accent-green)' : 'var(--accent-red)';
 
   // Banner
-  setBanner(isArb, profit, roiPct, totalImplied);
+  setBanner(hasProfit, profit, roiPct, totalImplied, isArb);
 
   // Info box
   const infoBox = document.getElementById('infoBox');
-  if (isArb) {
+  if (hasProfit) {
     infoBox.classList.remove('hidden');
     const stakeList = outcomes.map((o, i) => `<strong>$${fmtMoney(stakes[i])}</strong> on ${o.name || `Outcome ${i+1}`}`).join(', ');
     infoBox.innerHTML = `<strong>How to execute:</strong> Bet ${stakeList}. Regardless of which outcome wins, your guaranteed return is <strong>$${fmtMoney(guaranteedPayout)}</strong> for a profit of <strong>+$${fmtMoney(profit)}</strong> (${roiPct.toFixed(2)}% ROI).`;
@@ -514,26 +510,29 @@ function clearPayouts() {
   document.getElementById('footProfit').style.color = '';
 }
 
-function setBanner(isArb, profit, roiPct, totalImplied) {
+function setBanner(hasProfit, profit, roiPct, totalImplied, isArb) {
   const banner = document.getElementById('arbBanner');
   const text = document.getElementById('bannerText');
   const icon = banner.querySelector('.banner-icon');
 
-  if (isArb === null) {
+  if (hasProfit === null) {
     banner.className = 'arb-banner negative';
     icon.textContent = '—';
     text.textContent = 'Enter odds to check for arbitrage';
     return;
   }
 
-  if (isArb) {
+  if (hasProfit) {
     banner.className = 'arb-banner positive';
     icon.textContent = '✓';
     text.innerHTML = `Arbitrage opportunity found &mdash; guaranteed profit of <strong>+$${fmtMoney(profit)}</strong> (${roiPct.toFixed(2)}% ROI). Combined implied probability: ${(totalImplied * 100).toFixed(2)}%.`;
   } else {
     banner.className = 'arb-banner negative';
     icon.textContent = '✗';
-    text.innerHTML = `No arbitrage &mdash; books hold a <strong>${((totalImplied - 1) * 100).toFixed(2)}%</strong> margin. Combined implied probability: ${(totalImplied * 100).toFixed(2)}%.`;
+    const margin = isArb ? 0 : (totalImplied - 1) * 100;
+    text.innerHTML = isArb
+      ? `Arbitrage odds detected but stakes are unbalanced &mdash; adjust stakes to lock in profit. Combined implied probability: ${(totalImplied * 100).toFixed(2)}%.`
+      : `No arbitrage &mdash; books hold a <strong>${margin.toFixed(2)}%</strong> margin. Combined implied probability: ${(totalImplied * 100).toFixed(2)}%.`;
   }
 }
 
