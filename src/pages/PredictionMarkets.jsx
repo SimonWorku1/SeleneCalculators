@@ -64,7 +64,7 @@ export default function PredictionMarkets() {
 
     const next = { ...vals, [field]: raw }
     if (p !== null && p > 0 && p < 1) {
-      if (field !== 'cents')    next.cents    = (p * 100).toFixed(2)
+      if (field !== 'cents')    next.cents    = String(Math.round(p * 100))
       if (field !== 'american') next.american = formatAmerican(probToAmerican(p))
       if (field !== 'decimal')  next.decimal  = probToDecimal(p).toFixed(4)
       if (field !== 'frac')     next.frac     = toFractional(p)
