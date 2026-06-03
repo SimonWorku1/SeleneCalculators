@@ -607,28 +607,15 @@ input[type=number] { -moz-appearance: textfield; }
 }
 
 .pm-output {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .pm-output-label {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 8px;
-}
-
-.pm-output-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.pm-output-value.placeholder {
-  color: var(--text-muted);
-  font-weight: 400;
 }
 
 .active-row td { color: var(--accent); font-weight: 600; }

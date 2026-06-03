@@ -4,6 +4,10 @@ function probToAmerican(p) {
   if (p >= 0.5) return -(p / (1 - p)) * 100
   return ((1 - p) / p) * 100
 }
+function americanToDecimal(a) {
+  if (a >= 100) return a / 100 + 1
+  return 100 / Math.abs(a) + 1
+}
 function probToDecimal(p) { return 1 / p }
 function getGCD(a, b) { return b === 0 ? a : getGCD(b, a % b) }
 function toFractional(p) {
@@ -15,28 +19,60 @@ function toFractional(p) {
 function formatAmerican(a) {
   return a >= 0 ? `+${a.toFixed(0)}` : `${a.toFixed(0)}`
 }
+function parseFractional(str) {
+  const parts = str.split('/')
+  if (parts.length !== 2) return null
+  const num = parseFloat(parts[0])
+  const den = parseFloat(parts[1])
+  if (isNaN(num) || isNaN(den) || den === 0) return null
+  return 1 / (1 + num / den)
+}
 
 const REF_PROBS = [5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 95]
 
+const EMPTY = { cents: '', american: '', decimal: '', frac: '' }
+
 export default function PredictionMarkets() {
-  const [cents, setCents] = useState('')
+  const [vals, setVals] = useState(EMPTY)
 
-  const p = parseFloat(cents) / 100
-  const valid = !isNaN(p) && p > 0 && p < 1
+  function handleChange(field, raw) {
+    let p = null
 
-  const american = valid ? formatAmerican(probToAmerican(p)) : '—'
-  const decimal  = valid ? probToDecimal(p).toFixed(2) : '—'
-  const frac     = valid ? toFractional(p) : '—'
+    if (field === 'cents') {
+      const v = parseFloat(raw)
+      if (!isNaN(v) && v > 0 && v < 100) p = v / 100
+    } else if (field === 'american') {
+      const a = parseFloat(raw)
+      if (!isNaN(a) && (a >= 100 || a <= -100)) p = 1 / americanToDecimal(a)
+    } else if (field === 'decimal') {
+      const d = parseFloat(raw)
+      if (!isNaN(d) && d > 1) p = 1 / d
+    } else if (field === 'frac') {
+      p = parseFractional(raw)
+    }
+
+    const next = { ...vals, [field]: raw }
+    if (p !== null && p > 0 && p < 1) {
+      if (field !== 'cents')    next.cents    = (p * 100).toFixed(2)
+      if (field !== 'american') next.american = formatAmerican(probToAmerican(p))
+      if (field !== 'decimal')  next.decimal  = probToDecimal(p).toFixed(4)
+      if (field !== 'frac')     next.frac     = toFractional(p)
+    }
+    setVals(next)
+  }
+
+  const centsNum = parseFloat(vals.cents)
+  const activeRow = !isNaN(centsNum) ? Math.round(centsNum) : null
 
   return (
     <div className="page">
       <div className="page-header">
         <h1>Prediction Markets Converter</h1>
-        <p>Enter a prediction market price to convert to sports-book odds formats.</p>
+        <p>Enter any value to convert — all fields update together.</p>
       </div>
 
       <div className="card">
-        <div className="field">
+        <div className="field" style={{ marginBottom: 20 }}>
           <label style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
             Prediction Market Price (cents)
           </label>
@@ -45,26 +81,40 @@ export default function PredictionMarkets() {
             placeholder="e.g. 65"
             min="1"
             max="99"
-            step="1"
-            value={cents}
-            onChange={e => setCents(e.target.value)}
+            value={vals.cents}
+            onChange={e => handleChange('cents', e.target.value)}
             style={{ fontSize: 18 }}
-            autoFocus
           />
         </div>
 
         <div className="pm-outputs">
           <div className="pm-output">
             <div className="pm-output-label">American Odds</div>
-            <div className={`pm-output-value${valid ? '' : ' placeholder'}`}>{american}</div>
+            <input
+              type="number"
+              placeholder="e.g. -186"
+              value={vals.american}
+              onChange={e => handleChange('american', e.target.value)}
+            />
           </div>
           <div className="pm-output">
             <div className="pm-output-label">Decimal Odds</div>
-            <div className={`pm-output-value${valid ? '' : ' placeholder'}`}>{decimal}</div>
+            <input
+              type="number"
+              placeholder="e.g. 1.5385"
+              step="0.0001"
+              value={vals.decimal}
+              onChange={e => handleChange('decimal', e.target.value)}
+            />
           </div>
           <div className="pm-output">
             <div className="pm-output-label">Fractional Odds</div>
-            <div className={`pm-output-value${valid ? '' : ' placeholder'}`}>{frac}</div>
+            <input
+              type="text"
+              placeholder="e.g. 7/13"
+              value={vals.frac}
+              onChange={e => handleChange('frac', e.target.value)}
+            />
           </div>
         </div>
       </div>
@@ -79,10 +129,10 @@ export default function PredictionMarkets() {
             {REF_PROBS.map(pct => {
               const prob = pct / 100
               return (
-                <tr key={pct} className={cents === String(pct) ? 'active-row' : ''}>
+                <tr key={pct} className={activeRow === pct ? 'active-row' : ''}>
                   <td>{pct}¢</td>
                   <td>{formatAmerican(probToAmerican(prob))}</td>
-                  <td>{probToDecimal(prob).toFixed(2)}</td>
+                  <td>{probToDecimal(prob).toFixed(4)}</td>
                   <td>{toFractional(prob)}</td>
                 </tr>
               )
