@@ -1,7 +1,5 @@
 import { useState } from 'react'
 
-const NAMES = ['Home / Team A', 'Away / Team B', 'Draw']
-
 function toDecimal(val, fmt) {
   const n = parseFloat(val)
   if (isNaN(n)) return null
@@ -11,13 +9,11 @@ function toDecimal(val, fmt) {
   return null
 }
 
-function formatOdds(dec, fmt) {
-  if (fmt === 'decimal') return dec.toFixed(3)
-  if (dec >= 2) return '+' + (dec - 1) * 100 |0
-  return String((-100 / (dec - 1)) |0)
+function fmtAmerican(dec) {
+  if (dec >= 2) return '+' + Math.round((dec - 1) * 100)
+  return String(Math.round(-100 / (dec - 1)))
 }
 
-// Normal CDF approximation
 function normCDF(x) {
   const a1=0.254829592, a2=-0.284496736, a3=1.421413741, a4=-1.453152027, a5=1.061405429, p=0.3275911
   const sign = x < 0 ? -1 : 1
@@ -26,7 +22,6 @@ function normCDF(x) {
   return 0.5 * (1 + sign * y)
 }
 
-// Inverse normal CDF (rational approximation)
 function normInv(p) {
   const a = [-3.969683028665376e1,2.209460984245205e2,-2.759285104469687e2,1.383577518672690e2,-3.066479806614716e1,2.506628277459239]
   const b = [-5.447609879822406e1,1.615858368580409e2,-1.556989798598866e2,6.680131188771972e1,-1.328068155288572e1]
@@ -92,42 +87,56 @@ function devig(probs, method) {
 }
 
 const METHODS = [
-  { value: 'probit',         label: 'Probit' },
   { value: 'multiplicative', label: 'Multiplicative' },
   { value: 'additive',       label: 'Additive' },
   { value: 'power',          label: 'Power' },
+  { value: 'probit',         label: 'Probit' },
   { value: 'worstcase',      label: 'Worst Case' },
 ]
 
+let _id = 3
+
 export default function Devigger() {
   const [fmt, setFmt] = useState('american')
-  const [method, setMethod] = useState('probit')
-  const [size, setSize] = useState(2)
-  const [outcomes, setOutcomes] = useState([
-    { odds: '' },
-    { odds: '' },
+  const [method, setMethod] = useState('multiplicative')
+  const [kellyMult, setKellyMult] = useState('0.25')
+  const [kellyBankroll, setKellyBankroll] = useState('1000')
+  const [legs, setLegs] = useState([
+    { id: 1, a: '', b: '' },
+    { id: 2, a: '', b: '' },
   ])
+  const [finalOdds, setFinalOdds] = useState('')
 
-  function setMarket(n) {
-    setSize(n)
-    setOutcomes(Array.from({ length: n }, () => ({ odds: '' })))
+  function addLeg() { setLegs(p => [...p, { id: _id++, a: '', b: '' }]) }
+  function removeLeg(id) { if (legs.length > 1) setLegs(p => p.filter(l => l.id !== id)) }
+  function updateLeg(id, f, v) { setLegs(p => p.map(l => l.id === id ? { ...l, [f]: v } : l)) }
+
+  const legResults = legs.map(leg => {
+    const dA = toDecimal(leg.a, fmt), dB = toDecimal(leg.b, fmt)
+    if (!dA || !dB) return null
+    const pA = 1 / dA, pB = 1 / dB
+    const juice = (pA + pB - 1) * 100
+    const [fA] = devig([pA, pB], method)
+    return { juice, fA, fairOdds: fmtAmerican(1 / fA), fairPct: (fA * 100).toFixed(1) }
+  })
+
+  const allValid = legResults.every(r => r !== null)
+
+  const totalJuice = allValid ? legResults.reduce((s, r) => s + r.juice, 0) : null
+  const fairParlay = allValid ? legResults.reduce((p, r) => p * r.fA, 1) : null
+  const fairParlayOdds = fairParlay ? fmtAmerican(1 / fairParlay) : null
+
+  const finalDec = toDecimal(finalOdds, fmt)
+  let ev = null, kellyBet = null, kellyPctStr = null
+  if (fairParlay && finalDec) {
+    ev = (fairParlay * finalDec - 1) * 100
+    const b = finalDec - 1
+    const kelly = Math.max(0, (b * fairParlay - (1 - fairParlay)) / b) * (parseFloat(kellyMult) || 0.25)
+    kellyBet = (kelly * (parseFloat(kellyBankroll) || 1000)).toFixed(2)
+    kellyPctStr = (kelly * 100).toFixed(2)
   }
 
-  function updateOdds(i, val) {
-    setOutcomes(prev => prev.map((o, j) => j === i ? { ...o, odds: val } : o))
-  }
-
-  const decimals = outcomes.map(o => toDecimal(o.odds, fmt))
-  const allValid = decimals.every(d => d !== null)
-
-  let res = null
-  if (allValid) {
-    const imp = decimals.map(d => 1 / d)
-    const total = imp.reduce((a, b) => a + b, 0)
-    const vig = (total - 1) * 100
-    const fair = devig(imp, method)
-    res = { imp, total, vig, fair }
-  }
+  const methodLabel = METHODS.find(m => m.value === method)?.label
 
   return (
     <div className="page">
@@ -136,70 +145,138 @@ export default function Devigger() {
         <p>Remove the bookmaker's margin to find true no-vig probabilities and fair odds.</p>
       </div>
 
+      {/* Settings */}
       <div className="card">
-        <div className="dv-toolbar">
-          <div className="format-toggle" style={{ margin: 0 }}>
-            {['american', 'decimal'].map(f => (
-              <button key={f} className={`format-btn${fmt === f ? ' active' : ''}`} onClick={() => setFmt(f)}>
-                {f.charAt(0).toUpperCase() + f.slice(1)}
-              </button>
-            ))}
+        <div className="dv-settings">
+          <div className="dv-sg">
+            <label>Format</label>
+            <div className="format-toggle" style={{ margin: 0 }}>
+              {['american', 'decimal'].map(f => (
+                <button key={f} className={`format-btn${fmt === f ? ' active' : ''}`} onClick={() => setFmt(f)}>
+                  {f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
           </div>
-
-          <select value={method} onChange={e => setMethod(e.target.value)} style={{ width: 'auto' }}>
-            {METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-
-          <div className="format-toggle" style={{ margin: 0 }}>
-            {[2, 3].map(n => (
-              <button key={n} className={`format-btn${size === n ? ' active' : ''}`} onClick={() => setMarket(n)}>{n}-Way</button>
-            ))}
+          <div className="dv-sg">
+            <label>Devig Method</label>
+            <select value={method} onChange={e => setMethod(e.target.value)} style={{ width: 'auto' }}>
+              {METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+          <div className="dv-sg">
+            <label>Kelly Multiplier</label>
+            <input type="number" value={kellyMult} min="0.01" max="1" step="0.05"
+              onChange={e => setKellyMult(e.target.value)} style={{ width: 70 }} />
+          </div>
+          <div className="dv-sg">
+            <label>Kelly Bankroll $</label>
+            <input type="number" value={kellyBankroll} min="1"
+              onChange={e => setKellyBankroll(e.target.value)} style={{ width: 90 }} />
           </div>
         </div>
-
-        {/* Grid header */}
-        <div className="dv-grid" style={{ '--dv-cols': size }}>
-          <div className="dv-col-head">Odds</div>
-          <div className="dv-col-head">No-Vig %</div>
-          <div className="dv-col-head">No-Vig Odds</div>
-
-          {outcomes.map((o, i) => {
-            const fairPct  = res ? (res.fair[i] * 100).toFixed(2) + '%' : '—'
-            const fairOdds = res ? formatOdds(1 / res.fair[i], fmt) : '—'
-            const isGreen  = res && (1 / res.fair[i]) > decimals[i]
-            return (
-              <>
-                <input
-                  key={`odds-${i}`}
-                  type="number"
-                  placeholder={fmt === 'american' ? '+110' : '2.10'}
-                  value={o.odds}
-                  onChange={e => updateOdds(i, e.target.value)}
-                  className="dv-odds-input"
-                />
-                <div key={`pct-${i}`} className="dv-result">{fairPct}</div>
-                <div key={`odds-out-${i}`} className={`dv-result${isGreen ? ' dv-green' : ''}`}>{fairOdds}</div>
-              </>
-            )
-          })}
-        </div>
-
-        {res && (
-          <div className="dv-summary">
-            <span>Vig: <strong className="yellow">{res.vig.toFixed(2)}%</strong></span>
-            <span>Overround: <strong className="red">{(res.total * 100).toFixed(2)}%</strong></span>
-          </div>
-        )}
       </div>
 
+      {/* Legs */}
+      <div className="card">
+        <h2>
+          Leg Odds
+          <span className="dv-subhead">Your Side / Other Side</span>
+        </h2>
+        <div className="dv-legs">
+          {legs.map((leg, i) => (
+            <div key={leg.id} className="dv-leg">
+              <div className="dv-leg-inputs">
+                <span className="dv-leg-num">Leg {i + 1}</span>
+                <input type="number" className="dv-leg-inp"
+                  placeholder={fmt === 'american' ? '-110' : '1.91'}
+                  value={leg.a} onChange={e => updateLeg(leg.id, 'a', e.target.value)} />
+                <span className="dv-sep">/</span>
+                <input type="number" className="dv-leg-inp"
+                  placeholder={fmt === 'american' ? '-110' : '1.91'}
+                  value={leg.b} onChange={e => updateLeg(leg.id, 'b', e.target.value)} />
+                {legs.length > 1 && (
+                  <button className="dv-rm" onClick={() => removeLeg(leg.id)}>✕</button>
+                )}
+              </div>
+              {legResults[i] && (
+                <div className="dv-leg-out">
+                  Market Juice = <strong>{legResults[i].juice.toFixed(2)}%</strong>
+                  <span className="dv-dot"> · </span>
+                  Fair Value = <strong className="dv-green">{legResults[i].fairOdds}</strong>
+                  <span className="dv-muted"> ({legResults[i].fairPct}%)</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-sm btn-outline" onClick={addLeg} style={{ marginTop: 12 }}>+ Add Leg</button>
+      </div>
+
+      {/* Final / parlay odds */}
+      <div className="card">
+        <h2>{legs.length > 1 ? 'Final Parlay Odds' : 'Final Odds'}</h2>
+        <p className="dv-hint">
+          {legs.length > 1
+            ? 'Enter the offered parlay price to calculate EV and Kelly bet size.'
+            : 'Enter the offered odds on this bet to calculate EV and Kelly bet size.'}
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+          <input type="number" style={{ maxWidth: 180 }}
+            placeholder={fmt === 'american' ? 'e.g. +264' : 'e.g. 3.64'}
+            value={finalOdds} onChange={e => setFinalOdds(e.target.value)} />
+          {allValid && !finalOdds && fairParlayOdds && (
+            <span className="dv-hint" style={{ margin: 0 }}>
+              Fair value: <strong>{fairParlayOdds}</strong> ({fairParlay ? (fairParlay * 100).toFixed(1) : '—'}%)
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Results */}
+      {allValid && (
+        <div className="card">
+          <h2>
+            Results
+            <span className="dv-subhead">{methodLabel}</span>
+          </h2>
+          <div className="dv-res-list">
+            {legs.map((leg, i) => (
+              <div key={leg.id} className="dv-res-row">
+                <span className="dv-res-tag">Leg #{i + 1} ({leg.a})</span>
+                <span>Market Juice = <strong>{legResults[i].juice.toFixed(2)}%</strong></span>
+                <span>Fair Value = <strong className="dv-green">{legResults[i].fairOdds}</strong> ({legResults[i].fairPct}%)</span>
+              </div>
+            ))}
+
+            {legs.length > 1 && (
+              <div className="dv-res-row dv-res-parlay">
+                <span className="dv-res-tag">Final Odds ({fairParlayOdds})</span>
+                <span>Σ(Market Juice) = <strong>{totalJuice.toFixed(2)}%</strong></span>
+                <span>Fair Value = <strong className="dv-green">{fairParlayOdds}</strong> ({(fairParlay * 100).toFixed(1)}%)</span>
+              </div>
+            )}
+
+            {ev !== null && (
+              <div className="dv-res-row dv-res-summary">
+                <span className="dv-res-tag">Summary</span>
+                <span>EV% = <strong className={ev >= 0 ? 'dv-green' : 'dv-red'}>{ev >= 0 ? '+' : ''}{ev.toFixed(2)}%</strong></span>
+                <span>Kelly Bet = <strong>${kellyBet}</strong> ({kellyPctStr}% of bankroll)</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* About methods */}
       <div className="card">
         <h2>About Devig Methods</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14, color: 'var(--text-muted)' }}>
-          <div><strong style={{ color: 'var(--text)' }}>Probit</strong><br />Transforms implied probs through the inverse normal CDF, shifts them to sum to 100%, then transforms back. Tends to be accurate for balanced two-way markets.</div>
           <div><strong style={{ color: 'var(--text)' }}>Multiplicative</strong><br />Scales each implied probability proportionally so they sum to 100%. Most common method.</div>
           <div><strong style={{ color: 'var(--text)' }}>Additive</strong><br />Subtracts an equal share of overround from each implied probability.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Power</strong><br />Shin's method — finds an exponent analytically. Generally most accurate for heavily-vig'd markets.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Worst Case</strong><br />Assumes the full overround is against you — gives the most conservative (lowest) fair probability for each outcome.</div>
+          <div><strong style={{ color: 'var(--text)' }}>Power</strong><br />Finds exponent k such that Σp_i^k = 1. Generally most accurate for heavily-vig'd markets.</div>
+          <div><strong style={{ color: 'var(--text)' }}>Probit</strong><br />Transforms implied probs via inverse normal CDF, shifts to sum to 100%, then transforms back. Accurate for balanced two-way markets.</div>
+          <div><strong style={{ color: 'var(--text)' }}>Worst Case</strong><br />Assumes the full overround is against you — gives the most conservative fair probability.</div>
         </div>
       </div>
     </div>
