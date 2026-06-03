@@ -28,7 +28,16 @@ function parseFractional(str) {
   return 1 / (1 + num / den)
 }
 
-const REF_PROBS = [5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 95]
+function InfoTip({ text }) {
+  return (
+    <span className="info-tip">
+      <span className="info-tip-icon">i</span>
+      <span className="info-tip-box">{text}</span>
+    </span>
+  )
+}
+
+
 
 const EMPTY = { cents: '', american: '', decimal: '', frac: '' }
 
@@ -73,8 +82,9 @@ export default function PredictionMarkets() {
 
       <div className="card">
         <div className="field" style={{ marginBottom: 20 }}>
-          <label style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+          <label style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             Prediction Market Price (cents)
+            <InfoTip text="A number from 1–99 representing the market price in cents (e.g. 65 = 65% implied probability)." />
           </label>
           <input
             type="number"
@@ -89,7 +99,7 @@ export default function PredictionMarkets() {
 
         <div className="pm-outputs">
           <div className="pm-output">
-            <div className="pm-output-label">American Odds</div>
+            <div className="pm-output-label">American Odds <InfoTip text="≥ +100 for underdogs or ≤ −100 for favorites (e.g. +200, −150)." /></div>
             <input
               type="number"
               placeholder="e.g. -186"
@@ -98,7 +108,7 @@ export default function PredictionMarkets() {
             />
           </div>
           <div className="pm-output">
-            <div className="pm-output-label">Decimal Odds</div>
+            <div className="pm-output-label">Decimal Odds <InfoTip text="Any number greater than 1 (e.g. 1.5385). Represents total return per $1 staked." /></div>
             <input
               type="number"
               placeholder="e.g. 1.5385"
@@ -108,7 +118,7 @@ export default function PredictionMarkets() {
             />
           </div>
           <div className="pm-output">
-            <div className="pm-output-label">Fractional Odds</div>
+            <div className="pm-output-label">Fractional Odds <InfoTip text="Format: numerator/denominator (e.g. 7/13). Represents profit relative to stake." /></div>
             <input
               type="text"
               placeholder="e.g. 7/13"

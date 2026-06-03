@@ -623,3 +623,51 @@ input[type=number] { -moz-appearance: textfield; }
 @media (max-width: 500px) {
   .pm-outputs { grid-template-columns: 1fr; }
 }
+
+/* ── Info tooltip ── */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.info-tip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-style: italic;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.info-tip:hover .info-tip-box {
+  display: block;
+}
+
+.info-tip-box {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 400;
+  font-style: normal;
+  color: var(--text-muted);
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
