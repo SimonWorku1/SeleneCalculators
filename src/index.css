@@ -597,3 +597,42 @@ input[type=number] { -moz-appearance: textfield; }
 }
 
 .col-remove:hover { color: var(--accent-red); background: rgba(248,81,73,0.1); }
+
+/* ── Prediction markets output grid ── */
+.pm-outputs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.pm-output {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.pm-output-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.pm-output-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pm-output-value.placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.active-row td { color: var(--accent); font-weight: 600; }
+
+@media (max-width: 500px) {
+  .pm-outputs { grid-template-columns: 1fr; }
+}
