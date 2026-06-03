@@ -103,7 +103,6 @@ export default function Devigger() {
   const [kellyBankroll, setKellyBankroll] = useState('1000')
   const [legs, setLegs] = useState([
     { id: 1, a: '', b: '' },
-    { id: 2, a: '', b: '' },
   ])
   const [finalOdds, setFinalOdds] = useState('')
 
