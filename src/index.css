@@ -671,3 +671,77 @@ input[type=number] { -moz-appearance: textfield; }
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
+
+/* ── Devigger ── */
+.dv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.dv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.dv-col-head {
+  background: var(--surface2);
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.dv-col-head:not(:last-child) { border-right: 1px solid var(--border); }
+
+.dv-odds-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 15px;
+  outline: none;
+}
+
+.dv-odds-input:last-of-type { border-bottom: none; }
+.dv-odds-input:focus { background: var(--surface2); }
+
+.dv-result {
+  padding: 10px 14px;
+  font-size: 15px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.dv-result:nth-last-child(-n+2) { border-bottom: none; }
+
+.dv-result:not(:last-child) { border-right: 1px solid var(--border); }
+
+.dv-green { color: var(--accent-green); font-weight: 600; }
+
+.dv-summary {
+  display: flex;
+  gap: 20px;
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.yellow { color: var(--accent-yellow); }
+.red { color: var(--accent-red); }
+
+@media (max-width: 500px) {
+  .dv-toolbar { flex-direction: column; align-items: flex-start; }
+}
