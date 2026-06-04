@@ -76,7 +76,7 @@ export default function PredictionMarkets() {
     if (p !== null && p > 0 && p < 1) {
       if (field !== 'cents')    next.cents    = String(Math.round(p * 100))
       if (field !== 'american') next.american = formatAmerican(probToAmerican(p))
-      if (field !== 'decimal')  next.decimal  = probToDecimal(p).toFixed(4)
+      if (field !== 'decimal')  next.decimal  = probToDecimal(p).toFixed(2)
       if (field !== 'frac')     next.frac     = toFractional(p)
     }
     setVals(next)
@@ -154,7 +154,7 @@ export default function PredictionMarkets() {
                 <tr key={pct} className={activeRow === pct ? 'active-row' : ''}>
                   <td>{pct}¢</td>
                   <td>{formatAmerican(probToAmerican(prob))}</td>
-                  <td>{probToDecimal(prob).toFixed(4)}</td>
+                  <td>{probToDecimal(prob).toFixed(2)}</td>
                   <td>{toFractional(prob)}</td>
                 </tr>
               )
