@@ -105,7 +105,7 @@ export default function PredictionMarkets() {
           <div className="pm-output">
             <div className="pm-output-label">American Odds <InfoTip text="≥ +100 for underdogs or ≤ −100 for favorites (e.g. +200, −150)." /></div>
             <input
-              type="number"
+              type="text"
               placeholder="e.g. -186"
               value={vals.american}
               onChange={e => handleChange('american', e.target.value)}
