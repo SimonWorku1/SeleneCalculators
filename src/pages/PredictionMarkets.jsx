@@ -9,12 +9,20 @@ function americanToDecimal(a) {
   return 100 / Math.abs(a) + 1
 }
 function probToDecimal(p) { return 1 / p }
-function getGCD(a, b) { return b === 0 ? a : getGCD(b, a % b) }
 function toFractional(p) {
-  const num = Math.round(((1 - p) / p) * 100)
-  const denom = 100
-  const gcd = getGCD(num, denom)
-  return `${num / gcd}/${denom / gcd}`
+  const x = (1 - p) / p
+  let lo = [0, 1], hi = [1, 0]
+  for (let i = 0; i < 1000; i++) {
+    const mid = [lo[0] + hi[0], lo[1] + hi[1]]
+    if (mid[1] > 200) {
+      const best = Math.abs(lo[0] / lo[1] - x) <= Math.abs(hi[0] / hi[1] - x) ? lo : hi
+      return `${best[0]}/${best[1]}`
+    }
+    const v = mid[0] / mid[1]
+    if (Math.abs(v - x) < 1e-8) return `${mid[0]}/${mid[1]}`
+    if (v < x) lo = mid; else hi = mid
+  }
+  return `${lo[0]}/${lo[1]}`
 }
 function formatAmerican(a) {
   const r = Math.round(a)
