@@ -120,10 +120,10 @@ export default function PredictionMarkets() {
             />
           </div>
           <div className="pm-output">
-            <div className="pm-output-label">Decimal Odds <InfoTip text="Any number greater than 1 (e.g. 1.5385). Represents total return per $1 staked." /></div>
+            <div className="pm-output-label">Decimal Odds <InfoTip text="Any number greater than 1 (e.g. 1.54). Represents total return per $1 staked." /></div>
             <input
               type="number"
-              placeholder="e.g. 1.5385"
+              placeholder="e.g. 1.54"
               step="0.0001"
               value={vals.decimal}
               onChange={e => handleChange('decimal', e.target.value)}
