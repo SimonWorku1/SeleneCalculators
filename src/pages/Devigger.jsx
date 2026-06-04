@@ -78,11 +78,7 @@ function devig(probs, method) {
     return fair.map(p => p / s)
   }
 
-  if (method === 'worstcase') {
-    const fair = probs.map(p => Math.max(0, p - overround))
-    const s = fair.reduce((a, b) => a + b, 0)
-    return s > 0 ? fair.map(p => p / s) : probs.map(p => p / total)
-  }
+  if (method === 'worstcase') return probs.map(p => p / total)
 
   return probs.map(p => p / total)
 }
@@ -276,7 +272,7 @@ export default function Devigger() {
           <div><strong style={{ color: 'var(--text)' }}>Additive</strong><br />Subtracts an equal share of overround from each implied probability.</div>
           <div><strong style={{ color: 'var(--text)' }}>Power</strong><br />Finds exponent k such that Σp_i^k = 1. Generally most accurate for heavily-vig'd markets.</div>
           <div><strong style={{ color: 'var(--text)' }}>Probit</strong><br />Transforms implied probs via inverse normal CDF, shifts to sum to 100%, then transforms back. Accurate for balanced two-way markets.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Worst Case</strong><br />Assumes the full overround is against you — gives the most conservative fair probability.</div>
+          <div><strong style={{ color: 'var(--text)' }}>Worst Case</strong><br />Uses proportional (multiplicative) vig distribution as the conservative baseline — the standard worst-case assumption per CrazyNinjaMike's model.</div>
         </div>
       </div>
     </div>
