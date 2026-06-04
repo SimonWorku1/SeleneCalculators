@@ -11,7 +11,8 @@ function toDecimal(val, fmt) {
 
 function fmtAmerican(dec) {
   if (dec >= 2) return '+' + Math.round((dec - 1) * 100)
-  return String(Math.round(-100 / (dec - 1)))
+  const val = Math.round(-100 / (dec - 1))
+  return val === -100 ? '+100' : String(val)
 }
 
 function normCDF(x) {

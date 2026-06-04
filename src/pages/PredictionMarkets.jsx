@@ -17,7 +17,9 @@ function toFractional(p) {
   return `${num / gcd}/${denom / gcd}`
 }
 function formatAmerican(a) {
-  return a >= 0 ? `+${a.toFixed(0)}` : `${a.toFixed(0)}`
+  const r = Math.round(a)
+  if (r >= 0 || r === -100) return `+${Math.abs(r)}`
+  return String(r)
 }
 function parseFractional(str) {
   const parts = str.split('/')
