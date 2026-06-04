@@ -30,7 +30,7 @@ export default function EVCalculator() {
     const evPct = (ev / stake) * 100
     const bookProb = 1 / dec
     const edge = (p - bookProb) * 100
-    const kelly = (b * p - q) / b
+    const kelly = Math.max(0, (b * p - q) / b)
     const totalEV = ev * n
     const totalStaked = stake * n
     const variance = p * Math.pow(b * stake, 2) + q * Math.pow(stake, 2) - Math.pow(ev, 2)
