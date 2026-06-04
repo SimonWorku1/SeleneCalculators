@@ -1,5 +1,14 @@
 import { useState } from 'react'
 
+function InfoTip({ text }) {
+  return (
+    <span className="info-tip">
+      <span className="info-tip-icon">i</span>
+      <span className="info-tip-box">{text}</span>
+    </span>
+  )
+}
+
 function toDecimal(val, fmt) {
   const n = parseFloat(val)
   if (isNaN(n)) return null
@@ -178,6 +187,7 @@ export default function Devigger() {
         <h2>
           Leg Odds
           <span className="dv-subhead">Your Side / Other Side</span>
+          <InfoTip text="Enter both sides of the market for each leg. 'Your Side' is the bet you're evaluating; 'Other Side' completes the market so the vig can be removed." />
         </h2>
         <div className="dv-legs">
           {legs.map((leg, i) => (
@@ -211,7 +221,7 @@ export default function Devigger() {
 
       {/* Final / parlay odds */}
       <div className="card">
-        <h2>{legs.length > 1 ? 'Final Parlay Odds' : 'Final Odds'}</h2>
+        <h2>{legs.length > 1 ? 'Final Parlay Odds' : 'Final Odds'} <InfoTip text={legs.length > 1 ? "The actual parlay price offered by the book. Used to calculate EV% and Kelly bet size against the fair combined probability." : "The odds the book is offering on your bet. Used to calculate EV% and Kelly bet size against the fair no-vig probability."} /></h2>
         <p className="dv-hint">
           {legs.length > 1
             ? 'Enter the offered parlay price to calculate EV and Kelly bet size.'
@@ -235,6 +245,7 @@ export default function Devigger() {
           <h2>
             Results
             <span className="dv-subhead">{methodLabel}</span>
+            <InfoTip text="Market Juice is the book's vig on each leg. Fair Value is the no-vig probability and odds. EV% is your edge per dollar wagered. Kelly Bet is the recommended stake size." />
           </h2>
           <div className="dv-res-list">
             {legs.map((leg, i) => (
