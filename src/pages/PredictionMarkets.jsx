@@ -92,75 +92,83 @@ export default function PredictionMarkets() {
         <p>Enter any value to convert — all fields update together.</p>
       </div>
 
-      <div className="card">
-        <div className="field" style={{ marginBottom: 20 }}>
-          <label style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            Prediction Market Price (cents)
-            <InfoTip text="A number from 1–99 representing the market price in cents (e.g. 65 = 65% implied probability)." />
-          </label>
-          <input
-            type="number"
-            placeholder="e.g. 65"
-            min="1"
-            max="99"
-            value={vals.cents}
-            onChange={e => handleChange('cents', e.target.value)}
-            style={{ fontSize: 18 }}
-          />
+      <div className="calc-layout">
+        {/* LEFT: converter inputs */}
+        <div className="calc-col">
+          <div className="card">
+            <div className="field" style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Prediction Market Price (cents)
+                <InfoTip text="A number from 1–99 representing the market price in cents (e.g. 65 = 65% implied probability)." />
+              </label>
+              <input
+                type="number"
+                placeholder="e.g. 65"
+                min="1"
+                max="99"
+                value={vals.cents}
+                onChange={e => handleChange('cents', e.target.value)}
+                style={{ fontSize: 18 }}
+              />
+            </div>
+
+            <div className="pm-outputs">
+              <div className="pm-output">
+                <div className="pm-output-label">American Odds <InfoTip text="≥ +100 for underdogs or ≤ −100 for favorites (e.g. +200, −150)." /></div>
+                <input
+                  type="text"
+                  placeholder="e.g. -186"
+                  value={vals.american}
+                  onChange={e => handleChange('american', e.target.value)}
+                />
+              </div>
+              <div className="pm-output">
+                <div className="pm-output-label">Decimal Odds <InfoTip text="Any number greater than 1 (e.g. 1.54). Represents total return per $1 staked." /></div>
+                <input
+                  type="number"
+                  placeholder="e.g. 1.54"
+                  step="0.0001"
+                  value={vals.decimal}
+                  onChange={e => handleChange('decimal', e.target.value)}
+                />
+              </div>
+              <div className="pm-output">
+                <div className="pm-output-label">Fractional Odds <InfoTip text="Format: numerator/denominator (e.g. 7/13). Represents profit relative to stake." /></div>
+                <input
+                  type="text"
+                  placeholder="e.g. 7/13"
+                  value={vals.frac}
+                  onChange={e => handleChange('frac', e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="pm-outputs">
-          <div className="pm-output">
-            <div className="pm-output-label">American Odds <InfoTip text="≥ +100 for underdogs or ≤ −100 for favorites (e.g. +200, −150)." /></div>
-            <input
-              type="text"
-              placeholder="e.g. -186"
-              value={vals.american}
-              onChange={e => handleChange('american', e.target.value)}
-            />
-          </div>
-          <div className="pm-output">
-            <div className="pm-output-label">Decimal Odds <InfoTip text="Any number greater than 1 (e.g. 1.54). Represents total return per $1 staked." /></div>
-            <input
-              type="number"
-              placeholder="e.g. 1.54"
-              step="0.0001"
-              value={vals.decimal}
-              onChange={e => handleChange('decimal', e.target.value)}
-            />
-          </div>
-          <div className="pm-output">
-            <div className="pm-output-label">Fractional Odds <InfoTip text="Format: numerator/denominator (e.g. 7/13). Represents profit relative to stake." /></div>
-            <input
-              type="text"
-              placeholder="e.g. 7/13"
-              value={vals.frac}
-              onChange={e => handleChange('frac', e.target.value)}
-            />
+        {/* RIGHT: quick reference */}
+        <div className="calc-col">
+          <div className="card">
+            <h2>Quick Reference</h2>
+            <table className="result-table">
+              <thead>
+                <tr><th>Price (¢)</th><th>American</th><th>Decimal</th><th>Fractional</th></tr>
+              </thead>
+              <tbody>
+                {REF_PROBS.map(pct => {
+                  const prob = pct / 100
+                  return (
+                    <tr key={pct} className={activeRow === pct ? 'active-row' : ''}>
+                      <td>{pct}¢</td>
+                      <td>{formatAmerican(probToAmerican(prob))}</td>
+                      <td>{probToDecimal(prob).toFixed(2)}</td>
+                      <td>{toFractional(prob)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
-
-      <div className="card">
-        <h2>Quick Reference</h2>
-        <table className="result-table">
-          <thead>
-            <tr><th>Price (¢)</th><th>American</th><th>Decimal</th><th>Fractional</th></tr>
-          </thead>
-          <tbody>
-            {REF_PROBS.map(pct => {
-              const prob = pct / 100
-              return (
-                <tr key={pct} className={activeRow === pct ? 'active-row' : ''}>
-                  <td>{pct}¢</td>
-                  <td>{formatAmerican(probToAmerican(prob))}</td>
-                  <td>{probToDecimal(prob).toFixed(2)}</td>
-                  <td>{toFractional(prob)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
       </div>
     </div>
   )

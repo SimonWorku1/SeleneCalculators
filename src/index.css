@@ -70,9 +70,27 @@ nav a.active { color: var(--accent); }
 
 /* ── Page layout ── */
 .page {
-  max-width: 820px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 40px 24px 80px;
+}
+
+/* ── Two-column calculator layout ── */
+.calc-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+  align-items: start;
+}
+
+.calc-col {
+  min-width: 0;
+}
+
+@media (max-width: 820px) {
+  .calc-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .page-header {

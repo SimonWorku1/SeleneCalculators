@@ -150,140 +150,148 @@ export default function Devigger() {
         <p>Remove the bookmaker's margin to find true no-vig probabilities and fair odds.</p>
       </div>
 
-      {/* Settings */}
-      <div className="card">
-        <div className="dv-settings">
-          <div className="dv-sg">
-            <label>Format</label>
-            <div className="format-toggle" style={{ margin: 0 }}>
-              {['american', 'decimal'].map(f => (
-                <button key={f} className={`format-btn${fmt === f ? ' active' : ''}`} onClick={() => setFmt(f)}>
-                  {f.charAt(0).toUpperCase() + f.slice(1)}
-                </button>
+      <div className="calc-layout">
+        {/* LEFT: inputs */}
+        <div className="calc-col">
+          {/* Settings */}
+          <div className="card">
+            <div className="dv-settings">
+              <div className="dv-sg">
+                <label>Format</label>
+                <div className="format-toggle" style={{ margin: 0 }}>
+                  {['american', 'decimal'].map(f => (
+                    <button key={f} className={`format-btn${fmt === f ? ' active' : ''}`} onClick={() => setFmt(f)}>
+                      {f.charAt(0).toUpperCase() + f.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="dv-sg">
+                <label>Devig Method</label>
+                <select value={method} onChange={e => setMethod(e.target.value)} style={{ width: 'auto' }}>
+                  {METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </div>
+              <div className="dv-sg">
+                <label>Kelly Multiplier</label>
+                <input type="number" value={kellyMult} min="0.01" max="1" step="0.05"
+                  onChange={e => setKellyMult(e.target.value)} style={{ width: 70 }} />
+              </div>
+              <div className="dv-sg">
+                <label>Kelly Bankroll $</label>
+                <input type="number" value={kellyBankroll} min="1"
+                  onChange={e => setKellyBankroll(e.target.value)} style={{ width: 90 }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Legs */}
+          <div className="card">
+            <h2>
+              Leg Odds
+              <span className="dv-subhead">Your Side / Other Side</span>
+              <InfoTip text="Enter both sides of the market for each leg. 'Your Side' is the bet you're evaluating; 'Other Side' completes the market so the vig can be removed." />
+            </h2>
+            <div className="dv-legs">
+              {legs.map((leg, i) => (
+                <div key={leg.id} className="dv-leg">
+                  <div className="dv-leg-inputs">
+                    <span className="dv-leg-num">Leg {i + 1}</span>
+                    <input type="number" className="dv-leg-inp"
+                      placeholder={fmt === 'american' ? '-110' : '1.91'}
+                      value={leg.a} onChange={e => updateLeg(leg.id, 'a', e.target.value)} />
+                    <span className="dv-sep">/</span>
+                    <input type="number" className="dv-leg-inp"
+                      placeholder={fmt === 'american' ? '-110' : '1.91'}
+                      value={leg.b} onChange={e => updateLeg(leg.id, 'b', e.target.value)} />
+                    {legs.length > 1 && (
+                      <button className="dv-rm" onClick={() => removeLeg(leg.id)}>✕</button>
+                    )}
+                  </div>
+                  {legResults[i] && (
+                    <div className="dv-leg-out">
+                      Market Juice = <strong>{legResults[i].juice.toFixed(2)}%</strong>
+                      <span className="dv-dot"> · </span>
+                      Fair Value = <strong className="dv-green">{legResults[i].fairOdds}</strong>
+                      <span className="dv-muted"> ({legResults[i].fairPct}%)</span>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
+            <button className="btn btn-sm btn-outline" onClick={addLeg} style={{ marginTop: 12 }}>+ Add Leg</button>
           </div>
-          <div className="dv-sg">
-            <label>Devig Method</label>
-            <select value={method} onChange={e => setMethod(e.target.value)} style={{ width: 'auto' }}>
-              {METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
-          <div className="dv-sg">
-            <label>Kelly Multiplier</label>
-            <input type="number" value={kellyMult} min="0.01" max="1" step="0.05"
-              onChange={e => setKellyMult(e.target.value)} style={{ width: 70 }} />
-          </div>
-          <div className="dv-sg">
-            <label>Kelly Bankroll $</label>
-            <input type="number" value={kellyBankroll} min="1"
-              onChange={e => setKellyBankroll(e.target.value)} style={{ width: 90 }} />
-          </div>
-        </div>
-      </div>
 
-      {/* Legs */}
-      <div className="card">
-        <h2>
-          Leg Odds
-          <span className="dv-subhead">Your Side / Other Side</span>
-          <InfoTip text="Enter both sides of the market for each leg. 'Your Side' is the bet you're evaluating; 'Other Side' completes the market so the vig can be removed." />
-        </h2>
-        <div className="dv-legs">
-          {legs.map((leg, i) => (
-            <div key={leg.id} className="dv-leg">
-              <div className="dv-leg-inputs">
-                <span className="dv-leg-num">Leg {i + 1}</span>
-                <input type="number" className="dv-leg-inp"
-                  placeholder={fmt === 'american' ? '-110' : '1.91'}
-                  value={leg.a} onChange={e => updateLeg(leg.id, 'a', e.target.value)} />
-                <span className="dv-sep">/</span>
-                <input type="number" className="dv-leg-inp"
-                  placeholder={fmt === 'american' ? '-110' : '1.91'}
-                  value={leg.b} onChange={e => updateLeg(leg.id, 'b', e.target.value)} />
-                {legs.length > 1 && (
-                  <button className="dv-rm" onClick={() => removeLeg(leg.id)}>✕</button>
-                )}
-              </div>
-              {legResults[i] && (
-                <div className="dv-leg-out">
-                  Market Juice = <strong>{legResults[i].juice.toFixed(2)}%</strong>
-                  <span className="dv-dot"> · </span>
-                  Fair Value = <strong className="dv-green">{legResults[i].fairOdds}</strong>
-                  <span className="dv-muted"> ({legResults[i].fairPct}%)</span>
-                </div>
+          {/* Final / parlay odds */}
+          <div className="card">
+            <h2>{legs.length > 1 ? 'Final Parlay Odds' : 'Final Odds'} <InfoTip text={legs.length > 1 ? "The actual parlay price offered by the book. Used to calculate EV% and Kelly bet size against the fair combined probability." : "The odds the book is offering on your bet. Used to calculate EV% and Kelly bet size against the fair no-vig probability."} /></h2>
+            <p className="dv-hint">
+              {legs.length > 1
+                ? 'Enter the offered parlay price to calculate EV and Kelly bet size.'
+                : 'Enter the offered odds on this bet to calculate EV and Kelly bet size.'}
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+              <input type="number" style={{ maxWidth: 180 }}
+                placeholder={fmt === 'american' ? 'e.g. +264' : 'e.g. 3.64'}
+                value={finalOdds} onChange={e => setFinalOdds(e.target.value)} />
+              {allValid && !finalOdds && fairParlayOdds && (
+                <span className="dv-hint" style={{ margin: 0 }}>
+                  Fair value: <strong>{fairParlayOdds}</strong> ({fairParlay ? (fairParlay * 100).toFixed(1) : '—'}%)
+                </span>
               )}
             </div>
-          ))}
-        </div>
-        <button className="btn btn-sm btn-outline" onClick={addLeg} style={{ marginTop: 12 }}>+ Add Leg</button>
-      </div>
-
-      {/* Final / parlay odds */}
-      <div className="card">
-        <h2>{legs.length > 1 ? 'Final Parlay Odds' : 'Final Odds'} <InfoTip text={legs.length > 1 ? "The actual parlay price offered by the book. Used to calculate EV% and Kelly bet size against the fair combined probability." : "The odds the book is offering on your bet. Used to calculate EV% and Kelly bet size against the fair no-vig probability."} /></h2>
-        <p className="dv-hint">
-          {legs.length > 1
-            ? 'Enter the offered parlay price to calculate EV and Kelly bet size.'
-            : 'Enter the offered odds on this bet to calculate EV and Kelly bet size.'}
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-          <input type="number" style={{ maxWidth: 180 }}
-            placeholder={fmt === 'american' ? 'e.g. +264' : 'e.g. 3.64'}
-            value={finalOdds} onChange={e => setFinalOdds(e.target.value)} />
-          {allValid && !finalOdds && fairParlayOdds && (
-            <span className="dv-hint" style={{ margin: 0 }}>
-              Fair value: <strong>{fairParlayOdds}</strong> ({fairParlay ? (fairParlay * 100).toFixed(1) : '—'}%)
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Results */}
-      {allValid && (
-        <div className="card">
-          <h2>
-            Results
-            <span className="dv-subhead">{methodLabel}</span>
-            <InfoTip text="Market Juice is the book's vig on each leg. Fair Value is the no-vig probability and odds. EV% is your edge per dollar wagered. Kelly Bet is the recommended stake size." />
-          </h2>
-          <div className="dv-res-list">
-            {legs.map((leg, i) => (
-              <div key={leg.id} className="dv-res-row">
-                <span className="dv-res-tag">Leg #{i + 1} ({leg.a})</span>
-                <span>Market Juice = <strong>{legResults[i].juice.toFixed(2)}%</strong></span>
-                <span>Fair Value = <strong className="dv-green">{legResults[i].fairOdds}</strong> ({legResults[i].fairPct}%)</span>
-              </div>
-            ))}
-
-            {legs.length > 1 && (
-              <div className="dv-res-row dv-res-parlay">
-                <span className="dv-res-tag">Final Odds ({fairParlayOdds})</span>
-                <span>Σ(Market Juice) = <strong>{totalJuice.toFixed(2)}%</strong></span>
-                <span>Fair Value = <strong className="dv-green">{fairParlayOdds}</strong> ({(fairParlay * 100).toFixed(1)}%)</span>
-              </div>
-            )}
-
-            {ev !== null && (
-              <div className="dv-res-row dv-res-summary">
-                <span className="dv-res-tag">Summary</span>
-                <span>EV% = <strong className={ev >= 0 ? 'dv-green' : 'dv-red'}>{ev >= 0 ? '+' : ''}{ev.toFixed(2)}%</strong></span>
-                <span>Kelly Bet = <strong>${kellyBet}</strong> ({kellyPctStr}% of bankroll)</span>
-              </div>
-            )}
           </div>
         </div>
-      )}
 
-      {/* About methods */}
-      <div className="card">
-        <h2>About Devig Methods</h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14, color: 'var(--text-muted)' }}>
-          <div><strong style={{ color: 'var(--text)' }}>Multiplicative</strong><br />Scales each implied probability proportionally so they sum to 100%. Most common method.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Additive</strong><br />Subtracts an equal share of overround from each implied probability.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Power</strong><br />Finds exponent k such that Σp_i^k = 1. Generally most accurate for heavily-vig'd markets.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Probit</strong><br />Transforms implied probs via inverse normal CDF, shifts to sum to 100%, then transforms back. Accurate for balanced two-way markets.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Worst Case</strong><br />Uses proportional (multiplicative) vig distribution as the conservative baseline — the standard worst-case assumption per CrazyNinjaMike's model.</div>
+        {/* RIGHT: results */}
+        <div className="calc-col">
+          {/* Results */}
+          {allValid && (
+            <div className="card">
+              <h2>
+                Results
+                <span className="dv-subhead">{methodLabel}</span>
+                <InfoTip text="Market Juice is the book's vig on each leg. Fair Value is the no-vig probability and odds. EV% is your edge per dollar wagered. Kelly Bet is the recommended stake size." />
+              </h2>
+              <div className="dv-res-list">
+                {legs.map((leg, i) => (
+                  <div key={leg.id} className="dv-res-row">
+                    <span className="dv-res-tag">Leg #{i + 1} ({leg.a})</span>
+                    <span>Market Juice = <strong>{legResults[i].juice.toFixed(2)}%</strong></span>
+                    <span>Fair Value = <strong className="dv-green">{legResults[i].fairOdds}</strong> ({legResults[i].fairPct}%)</span>
+                  </div>
+                ))}
+
+                {legs.length > 1 && (
+                  <div className="dv-res-row dv-res-parlay">
+                    <span className="dv-res-tag">Final Odds ({fairParlayOdds})</span>
+                    <span>Σ(Market Juice) = <strong>{totalJuice.toFixed(2)}%</strong></span>
+                    <span>Fair Value = <strong className="dv-green">{fairParlayOdds}</strong> ({(fairParlay * 100).toFixed(1)}%)</span>
+                  </div>
+                )}
+
+                {ev !== null && (
+                  <div className="dv-res-row dv-res-summary">
+                    <span className="dv-res-tag">Summary</span>
+                    <span>EV% = <strong className={ev >= 0 ? 'dv-green' : 'dv-red'}>{ev >= 0 ? '+' : ''}{ev.toFixed(2)}%</strong></span>
+                    <span>Kelly Bet = <strong>${kellyBet}</strong> ({kellyPctStr}% of bankroll)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* About methods */}
+          <div className="card">
+            <h2>About Devig Methods</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14, color: 'var(--text-muted)' }}>
+              <div><strong style={{ color: 'var(--text)' }}>Multiplicative</strong><br />Scales each implied probability proportionally so they sum to 100%. Most common method.</div>
+              <div><strong style={{ color: 'var(--text)' }}>Additive</strong><br />Subtracts an equal share of overround from each implied probability.</div>
+              <div><strong style={{ color: 'var(--text)' }}>Power</strong><br />Finds exponent k such that Σp_i^k = 1. Generally most accurate for heavily-vig'd markets.</div>
+              <div><strong style={{ color: 'var(--text)' }}>Probit</strong><br />Transforms implied probs via inverse normal CDF, shifts to sum to 100%, then transforms back. Accurate for balanced two-way markets.</div>
+              <div><strong style={{ color: 'var(--text)' }}>Worst Case</strong><br />Uses proportional (multiplicative) vig distribution as the conservative baseline — the standard worst-case assumption per CrazyNinjaMike's model.</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

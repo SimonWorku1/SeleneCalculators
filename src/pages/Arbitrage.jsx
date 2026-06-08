@@ -84,136 +84,144 @@ export default function Arbitrage() {
         <p>Enter odds and stakes for each outcome to detect guaranteed profit opportunities and calculate optimal wager amounts.</p>
       </div>
 
-      {/* Settings bar */}
-      <div className="settings-bar">
-        <div>
-          <label>Odds Format</label>
-          <div className="format-toggle" style={{ display: 'inline-flex' }}>
-            <button className={`format-btn${oddsFormat === 'american' ? ' active' : ''}`} onClick={() => setOddsFormat('american')}>American</button>
-            <button className={`format-btn${oddsFormat === 'decimal' ? ' active' : ''}`} onClick={() => setOddsFormat('decimal')}>Decimal</button>
-          </div>
-        </div>
-        <div>
-          <label>Stakes</label>
-          <div className="format-toggle" style={{ display: 'inline-flex' }}>
-            <button className={`format-btn${stakeMode === 'manual' ? ' active' : ''}`} onClick={() => setStakeMode('manual')}>Manual</button>
-            <button className={`format-btn${stakeMode === 'auto' ? ' active' : ''}`} onClick={() => setStakeMode('auto')}>Auto (Optimal)</button>
-          </div>
-        </div>
-        {stakeMode === 'auto' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <label style={{ margin: 0 }}>Bankroll $</label>
-            <input type="number" value={bankroll} placeholder="1000" min="1" style={{ width: 110 }} onChange={e => setBankroll(e.target.value)} />
-          </div>
-        )}
-      </div>
-
-      {/* Banner */}
-      <div className={`arb-banner ${hasProfit ? 'positive' : 'negative'}`}>
-        <span className="banner-icon">{!allOddsValid ? '—' : hasProfit ? '✓' : '✗'}</span>
-        <span>
-          {!allOddsValid
-            ? 'Enter odds to check for arbitrage'
-            : hasProfit
-              ? <span>Arbitrage opportunity found — guaranteed profit of <strong>+${fmt(profit)}</strong> ({roiPct.toFixed(2)}% ROI). Combined implied probability: {(totalImplied * 100).toFixed(2)}%.</span>
-              : isArb
-                ? <span>Arbitrage odds detected but stakes are unbalanced — adjust stakes to lock in profit. Combined implied probability: {(totalImplied * 100).toFixed(2)}%.</span>
-                : <span>No arbitrage — books hold a <strong>{((totalImplied - 1) * 100).toFixed(2)}%</strong> margin. Combined implied probability: {(totalImplied * 100).toFixed(2)}%.</span>
-          }
-        </span>
-      </div>
-
-      {/* Grid card */}
-      <div className="arb-card">
-        {/* Column headers */}
-        <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
-          <div className="arb-col-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }} />
-          {outcomes.map((o, i) => (
-            <div key={o.id} className="arb-col-header" style={{ gridColumn: i + 2 }}>
-              <input
-                type="text"
-                value={o.name}
-                onChange={e => updateName(o.id, e.target.value)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px', width: '100%', outline: 'none', padding: 0 }}
-              />
-            </div>
-          ))}
-        </div>
-
-        {/* Odds row */}
-        <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
-          <div className="arb-row-label">Odds</div>
-          {outcomes.map(o => (
-            <div key={o.id} className="arb-cell">
-              <input
-                type="number"
-                className="odds-inp"
-                placeholder={oddsFormat === 'american' ? '+110' : '2.10'}
-                value={o.odds}
-                onChange={e => updateOdds(o.id, e.target.value)}
-              />
-            </div>
-          ))}
-        </div>
-
-        {/* Stake row */}
-        <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
-          <div className="arb-row-label">Stake</div>
-          {outcomes.map((o, i) => (
-            <div key={o.id} className="arb-cell">
-              <div className={`money-wrap${stakeMode === 'auto' ? ' readonly' : ''}`}>
-                <span className="prefix">$</span>
-                <input
-                  type="number"
-                  className="stake-inp"
-                  placeholder="100"
-                  value={stakeMode === 'auto' ? (allOddsValid ? stakes[i].toFixed(2) : o.stake) : o.stake}
-                  readOnly={stakeMode === 'auto'}
-                  onChange={stakeMode === 'manual' ? e => updateStake(o.id, e.target.value) : undefined}
-                />
+      <div className="calc-layout">
+        {/* LEFT: inputs */}
+        <div className="calc-col">
+          {/* Settings bar */}
+          <div className="settings-bar">
+            <div>
+              <label>Odds Format</label>
+              <div className="format-toggle" style={{ display: 'inline-flex' }}>
+                <button className={`format-btn${oddsFormat === 'american' ? ' active' : ''}`} onClick={() => setOddsFormat('american')}>American</button>
+                <button className={`format-btn${oddsFormat === 'decimal' ? ' active' : ''}`} onClick={() => setOddsFormat('decimal')}>Decimal</button>
               </div>
             </div>
-          ))}
-        </div>
-
-        {/* Payout row */}
-        <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
-          <div className="arb-row-label">Payout</div>
-          {outcomes.map((o, i) => (
-            <div key={o.id} className="arb-cell">
-              <div className="money-wrap readonly">
-                <span className="prefix">$</span>
-                <input type="number" readOnly value={allOddsValid ? fmt(payouts[i]) : ''} placeholder="0.00" />
+            <div>
+              <label>Stakes</label>
+              <div className="format-toggle" style={{ display: 'inline-flex' }}>
+                <button className={`format-btn${stakeMode === 'manual' ? ' active' : ''}`} onClick={() => setStakeMode('manual')}>Manual</button>
+                <button className={`format-btn${stakeMode === 'auto' ? ' active' : ''}`} onClick={() => setStakeMode('auto')}>Auto (Optimal)</button>
               </div>
             </div>
-          ))}
-        </div>
+            {stakeMode === 'auto' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ margin: 0 }}>Bankroll $</label>
+                <input type="number" value={bankroll} placeholder="1000" min="1" style={{ width: 110 }} onChange={e => setBankroll(e.target.value)} />
+              </div>
+            )}
+          </div>
 
-        {/* Footer */}
-        <div className="arb-footer">
-          <div className="arb-footer-item">
-            <div className="f-label">Total Stake</div>
-            <div className="f-value">${fmt(totalStake)}</div>
-          </div>
-          <div className="arb-footer-item">
-            <div className="f-label">Total Payout</div>
-            <div className="f-value">${allOddsValid ? fmt(guaranteedPayout) : '0.00'}</div>
-          </div>
-          <div className="arb-footer-item">
-            <div className="f-label">{hasProfit ? 'Profit' : 'Loss'} ({roiPct.toFixed(2)}%)</div>
-            <div className="f-value" style={{ color: hasProfit ? 'var(--accent-green)' : allOddsValid ? 'var(--accent-red)' : undefined }}>
-              {allOddsValid ? `${profit >= 0 ? '+' : ''}$${fmt(profit)}` : '$0.00'}
+          {/* Grid card */}
+          <div className="arb-card">
+            {/* Column headers */}
+            <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+              <div className="arb-col-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }} />
+              {outcomes.map((o, i) => (
+                <div key={o.id} className="arb-col-header" style={{ gridColumn: i + 2 }}>
+                  <input
+                    type="text"
+                    value={o.name}
+                    onChange={e => updateName(o.id, e.target.value)}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px', width: '100%', outline: 'none', padding: 0 }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Odds row */}
+            <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+              <div className="arb-row-label">Odds</div>
+              {outcomes.map(o => (
+                <div key={o.id} className="arb-cell">
+                  <input
+                    type="number"
+                    className="odds-inp"
+                    placeholder={oddsFormat === 'american' ? '+110' : '2.10'}
+                    value={o.odds}
+                    onChange={e => updateOdds(o.id, e.target.value)}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Stake row */}
+            <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+              <div className="arb-row-label">Stake</div>
+              {outcomes.map((o, i) => (
+                <div key={o.id} className="arb-cell">
+                  <div className={`money-wrap${stakeMode === 'auto' ? ' readonly' : ''}`}>
+                    <span className="prefix">$</span>
+                    <input
+                      type="number"
+                      className="stake-inp"
+                      placeholder="100"
+                      value={stakeMode === 'auto' ? (allOddsValid ? stakes[i].toFixed(2) : o.stake) : o.stake}
+                      readOnly={stakeMode === 'auto'}
+                      onChange={stakeMode === 'manual' ? e => updateStake(o.id, e.target.value) : undefined}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Payout row */}
+            <div className="arb-row" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+              <div className="arb-row-label">Payout</div>
+              {outcomes.map((o, i) => (
+                <div key={o.id} className="arb-cell">
+                  <div className="money-wrap readonly">
+                    <span className="prefix">$</span>
+                    <input type="number" readOnly value={allOddsValid ? fmt(payouts[i]) : ''} placeholder="0.00" />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="arb-footer">
+              <div className="arb-footer-item">
+                <div className="f-label">Total Stake</div>
+                <div className="f-value">${fmt(totalStake)}</div>
+              </div>
+              <div className="arb-footer-item">
+                <div className="f-label">Total Payout</div>
+                <div className="f-value">${allOddsValid ? fmt(guaranteedPayout) : '0.00'}</div>
+              </div>
+              <div className="arb-footer-item">
+                <div className="f-label">{hasProfit ? 'Profit' : 'Loss'} ({roiPct.toFixed(2)}%)</div>
+                <div className="f-value" style={{ color: hasProfit ? 'var(--accent-green)' : allOddsValid ? 'var(--accent-red)' : undefined }}>
+                  {allOddsValid ? `${profit >= 0 ? '+' : ''}$${fmt(profit)}` : '$0.00'}
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Info box */}
-      {hasProfit && (
-        <div className="info-box">
-          <strong>How to execute:</strong> Bet {outcomes.map((o, i) => <span key={o.id}><strong>${fmt(stakes[i])}</strong> on {o.name || `Outcome ${i + 1}`}{i < outcomes.length - 1 ? ', ' : ''}</span>)}. Regardless of which outcome wins, your guaranteed return is <strong>${fmt(guaranteedPayout)}</strong> for a profit of <strong>+${fmt(profit)}</strong> ({roiPct.toFixed(2)}% ROI).
+        {/* RIGHT: results */}
+        <div className="calc-col">
+          {/* Banner */}
+          <div className={`arb-banner ${hasProfit ? 'positive' : 'negative'}`}>
+            <span className="banner-icon">{!allOddsValid ? '—' : hasProfit ? '✓' : '✗'}</span>
+            <span>
+              {!allOddsValid
+                ? 'Enter odds to check for arbitrage'
+                : hasProfit
+                  ? <span>Arbitrage opportunity found — guaranteed profit of <strong>+${fmt(profit)}</strong> ({roiPct.toFixed(2)}% ROI). Combined implied probability: {(totalImplied * 100).toFixed(2)}%.</span>
+                  : isArb
+                    ? <span>Arbitrage odds detected but stakes are unbalanced — adjust stakes to lock in profit. Combined implied probability: {(totalImplied * 100).toFixed(2)}%.</span>
+                    : <span>No arbitrage — books hold a <strong>{((totalImplied - 1) * 100).toFixed(2)}%</strong> margin. Combined implied probability: {(totalImplied * 100).toFixed(2)}%.</span>
+              }
+            </span>
+          </div>
+
+          {/* Info box */}
+          {hasProfit && (
+            <div className="info-box">
+              <strong>How to execute:</strong> Bet {outcomes.map((o, i) => <span key={o.id}><strong>${fmt(stakes[i])}</strong> on {o.name || `Outcome ${i + 1}`}{i < outcomes.length - 1 ? ', ' : ''}</span>)}. Regardless of which outcome wins, your guaranteed return is <strong>${fmt(guaranteedPayout)}</strong> for a profit of <strong>+${fmt(profit)}</strong> ({roiPct.toFixed(2)}% ROI).
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 }
