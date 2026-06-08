@@ -28,6 +28,11 @@ export default function Home() {
           <h3>Expected Value Calculator</h3>
           <p>Calculate the expected value of any bet given your edge. See EV in dollars, ROI percentage, and long-run projections.</p>
         </Link>
+        <Link to="/bonus-bet" className="calc-card">
+          <div className="icon">🎁</div>
+          <h3>Bonus Bet Converter</h3>
+          <p>Convert a free bet or bonus into guaranteed cash by finding the optimal hedge stake. Works for both free bets and regular bet hedging.</p>
+        </Link>
       </div>
     </div>
   )
