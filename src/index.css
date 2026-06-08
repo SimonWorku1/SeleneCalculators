@@ -690,6 +690,36 @@ input[type=number] { -moz-appearance: textfield; }
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
 
+/* ── EV tabs ── */
+.ev-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ev-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 16px;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+  width: auto;
+  border-radius: 0;
+}
+
+.ev-tab:hover { color: var(--text); opacity: 1; }
+
+.ev-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
 /* ── Bonus Bet ── */
 .bb-settings {
   display: flex;
