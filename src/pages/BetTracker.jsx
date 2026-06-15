@@ -120,6 +120,7 @@ export default function BetTracker() {
   })
   const [error, setError] = useState('')
   const [importMsg, setImportMsg] = useState('')
+  const [testEv, setTestEv] = useState('0')
   const fileRef = useRef(null)
 
   // persist
@@ -168,15 +169,26 @@ export default function BetTracker() {
       'Real Madrid to win', 'Djokovic to win', 'Under 215.5', 'Eagles ML', 'Bills -7']
     const books = ['Kalshi', 'DraftKings', 'FanDuel', 'BetMGM', 'Polymarket', 'Caesars']
     const americanOdds = [-200, -150, -130, -110, +100, +120, +150, +180, +220, +300, -250]
-    const results = ['won', 'won', 'lost', 'lost', 'lost', 'won', 'push', 'pending']
     const rand = (arr) => arr[Math.floor(Math.random() * arr.length)]
+
+    // Target EV as ROI per bet (% of stake). For decimal odds `dec`, the win
+    // probability that yields a given EV is p = (EV + 1) / dec, since
+    // EV = p·dec − 1. ~12% of bets are left pending and don't count toward P&L.
+    const targetRoi = (parseFloat(testEv) || 0) / 100
 
     const count = 12 + Math.floor(Math.random() * 9) // 12–20 bets
     const made = []
     for (let i = 0; i < count; i++) {
       const day = 1 + Math.floor(Math.random() * daysInMonth)
       const odds = rand(americanOdds)
+      const dec = toDecimal(odds, 'american')
       const wager = Math.round((5 + Math.random() * 195) / 5) * 5 // $5–$200, step 5
+      let result
+      if (Math.random() < 0.12) result = 'pending'
+      else {
+        const p = Math.min(0.97, Math.max(0.03, (targetRoi + 1) / dec))
+        result = Math.random() < p ? 'won' : 'lost'
+      }
       made.push({
         id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random() + i),
         date: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
@@ -185,12 +197,13 @@ export default function BetTracker() {
         wager,
         odds: (odds > 0 ? '+' : '') + odds,
         fmt: 'american',
-        dec: toDecimal(odds, 'american'),
-        result: rand(results),
+        dec,
+        result,
       })
     }
     setBets(prev => [...prev, ...made])
-    setImportMsg(`Added ${count} random test bets to ${MONTHS[month]} ${year}.`)
+    const evLabel = targetRoi === 0 ? 'break-even' : `${targetRoi > 0 ? '+' : ''}${(targetRoi * 100).toFixed(0)}% EV`
+    setImportMsg(`Added ${count} random test bets (${evLabel}) to ${MONTHS[month]} ${year}.`)
   }
 
   function clearMonth() {
@@ -539,6 +552,13 @@ export default function BetTracker() {
           <button className="btn btn-outline btn-sm" onClick={generateTestBets}>🎲 Generate Test Bets</button>
           <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importCsv} style={{ display: 'none' }} />
+        </div>
+        <div className="field" style={{ marginTop: 14, maxWidth: 260 }}>
+          <label>Target EV for test bets (ROI %)</label>
+          <input type="number" step="any" placeholder="0" value={testEv} onChange={e => setTestEv(e.target.value)} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Positive trends winning, negative trends losing, 0 ≈ break-even.
+          </span>
         </div>
         {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
         <div className="info-box" style={{ marginTop: 14 }}>
