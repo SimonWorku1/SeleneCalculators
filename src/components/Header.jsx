@@ -10,6 +10,7 @@ export default function Header() {
         <NavLink to="/devigger" className={({ isActive }) => isActive ? 'active' : ''}>Devigger</NavLink>
         <NavLink to="/ev-calculator" className={({ isActive }) => isActive ? 'active' : ''}>Expected Value</NavLink>
         <NavLink to="/bonus-bet" className={({ isActive }) => isActive ? 'active' : ''}>Bonus Bet</NavLink>
+        <NavLink to="/bet-tracker" className={({ isActive }) => isActive ? 'active' : ''}>Bet Tracker</NavLink>
       </nav>
     </header>
   )

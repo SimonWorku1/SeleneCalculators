@@ -869,3 +869,102 @@ input[type=number] { -moz-appearance: textfield; }
   .dv-leg-inp  { width: 90px; }
   .dv-res-tag  { min-width: unset; width: 100%; }
 }
+
+/* ── Bet Tracker ── */
+.bt-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.bt-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.bt-weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: 4px;
+}
+
+.bt-cell {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 78px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bt-cell.empty {
+  background: transparent;
+  border-color: transparent;
+}
+
+.bt-cell.today {
+  border-color: var(--accent);
+}
+
+.bt-cell.pos { background: rgba(63,185,80,0.10); border-color: rgba(63,185,80,0.30); }
+.bt-cell.neg { background: rgba(248,81,73,0.10); border-color: rgba(248,81,73,0.30); }
+
+.bt-day-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.bt-day-pnl {
+  font-size: 14px;
+  font-weight: 700;
+  margin-top: auto;
+}
+
+.bt-day-pnl.green { color: var(--accent-green); }
+.bt-day-pnl.red { color: var(--accent-red); }
+
+.bt-day-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.bt-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.bt-axis {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
+.bt-del {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.bt-del:hover { color: var(--accent-red); background: rgba(248,81,73,0.10); }
+
+@media (max-width: 640px) {
+  .bt-cell { min-height: 58px; padding: 4px; }
+  .bt-day-pnl { font-size: 12px; }
+  .bt-day-count { display: none; }
+}

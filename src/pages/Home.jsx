@@ -33,6 +33,11 @@ export default function Home() {
           <h3>Bonus Bet Converter</h3>
           <p>Convert a free bet or bonus into guaranteed cash by finding the optimal hedge stake. Works for both free bets and regular bet hedging.</p>
         </Link>
+        <Link to="/bet-tracker" className="calc-card">
+          <div className="icon">📅</div>
+          <h3>Bet Tracker</h3>
+          <p>Log your bets, wagers, and odds. See daily profit and loss on a calendar and chart your cumulative or daily results across the month.</p>
+        </Link>
       </div>
     </div>
   )
