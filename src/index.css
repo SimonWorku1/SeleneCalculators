@@ -1000,3 +1000,54 @@ input[type=number] { -moz-appearance: textfield; }
   margin: 0;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
+
+/* ── Bet Tracker: source tabs, Kalshi key input, tutorial ── */
+.bt-source-tabs {
+  margin-bottom: 20px;
+}
+
+.bt-secret {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+  width: 100%;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+
+.bt-secret:focus { border-color: var(--accent); }
+
+.bt-show-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.bt-show-toggle input { width: auto; }
+
+.bt-steps {
+  margin: 10px 0 4px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bt-steps li { line-height: 1.55; }
+
+.info-box code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}

@@ -3,6 +3,8 @@ import { httpsCallable } from 'firebase/functions'
 import { functions } from '../firebase.js'
 
 const STORAGE_KEY = 'selene_bets'
+const KALSHI_KEYID = 'selene_kalshi_key_id'
+const KALSHI_PRIVKEY = 'selene_kalshi_private_key'
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -36,7 +38,9 @@ function loadBets() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr : []
+    if (!Array.isArray(arr)) return []
+    // backfill source for bets saved before source tagging existed
+    return arr.map(b => ({ ...b, source: b.source || 'manual' }))
   } catch {
     return []
   }
@@ -123,10 +127,18 @@ export default function BetTracker() {
   const [error, setError] = useState('')
   const [importMsg, setImportMsg] = useState('')
   const [genMsg, setGenMsg] = useState('')
+  const [syncMsg, setSyncMsg] = useState('')
   const [testEv, setTestEv] = useState('5')
   const [showManual, setShowManual] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [sourceTab, setSourceTab] = useState('all') // all | manual | kalshi
+  const [kKeyId, setKKeyId] = useState(() => { try { return localStorage.getItem(KALSHI_KEYID) || '' } catch { return '' } })
+  const [kPriv, setKPriv] = useState(() => { try { return localStorage.getItem(KALSHI_PRIVKEY) || '' } catch { return '' } })
+  const [editKalshi, setEditKalshi] = useState(() => { try { return !localStorage.getItem(KALSHI_KEYID) } catch { return true } })
+  const [showSecret, setShowSecret] = useState(false)
+  const [showTutorial, setShowTutorial] = useState(false)
   const fileRef = useRef(null)
+  const kalshiConnected = !editKalshi && kKeyId && kPriv
 
   // persist
   useEffect(() => {
@@ -152,6 +164,7 @@ export default function BetTracker() {
       fmt: oddsFmt,
       dec,
       result: form.result,
+      source: 'manual',
     }
     setBets(prev => [...prev, bet])
     setForm(f => ({ ...f, description: '', wager: '', odds: '' }))
@@ -207,6 +220,7 @@ export default function BetTracker() {
           fmt: 'american',
           dec,
           result,
+          source: 'manual',
         })
       }
     }
@@ -230,24 +244,55 @@ export default function BetTracker() {
     setImportMsg('Cleared all bets.')
   }
 
-  /* ── Kalshi sync (via Firebase Cloud Function) ── */
+  /* ── Kalshi key (stored locally on this device) ── */
+  function saveKalshiKey() {
+    const id = kKeyId.trim()
+    const pk = kPriv.trim()
+    if (!id || !pk) { setSyncMsg('Enter both your Key ID and private key.'); return }
+    try {
+      localStorage.setItem(KALSHI_KEYID, id)
+      localStorage.setItem(KALSHI_PRIVKEY, pk)
+    } catch { /* ignore quota */ }
+    setKKeyId(id)
+    setKPriv(pk)
+    setEditKalshi(false)
+    setShowSecret(false)
+    setSyncMsg('Kalshi key saved on this device.')
+  }
+
+  function removeKalshiKey() {
+    if (!window.confirm('Remove your Kalshi key from this device?')) return
+    try {
+      localStorage.removeItem(KALSHI_KEYID)
+      localStorage.removeItem(KALSHI_PRIVKEY)
+    } catch { /* ignore */ }
+    setKKeyId('')
+    setKPriv('')
+    setEditKalshi(true)
+    setSyncMsg('Kalshi key removed.')
+  }
+
+  /* ── Kalshi sync (key signed server-side via Firebase Cloud Function) ── */
   async function syncKalshi() {
+    if (!kKeyId || !kPriv) { setSyncMsg('Save your Kalshi key first.'); return }
     setSyncing(true)
-    setImportMsg('Syncing from Kalshi…')
+    setSyncMsg('Syncing from Kalshi…')
     try {
       const fn = httpsCallable(functions, 'syncKalshi')
-      const { data } = await fn()
+      const { data } = await fn({ keyId: kKeyId, privateKey: kPriv })
       const incoming = Array.isArray(data?.bets) ? data.bets : []
       let added = 0
       setBets(prev => {
         const ids = new Set(prev.map(b => b.id))
-        const fresh = incoming.filter(b => b && b.id && !ids.has(b.id))
+        const fresh = incoming
+          .filter(b => b && b.id && !ids.has(b.id))
+          .map(b => ({ ...b, source: 'kalshi' }))
         added = fresh.length
         return [...prev, ...fresh]
       })
-      setImportMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} (${incoming.length} returned).`)
+      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned).`)
     } catch (e) {
-      setImportMsg(`Kalshi sync failed: ${e.message}. The syncKalshi Cloud Function must be deployed first — see KALSHI_SETUP.md.`)
+      setSyncMsg(`Kalshi sync failed: ${e.message || e}. The syncKalshi Cloud Function must be deployed first — see KALSHI_SETUP.md.`)
     } finally {
       setSyncing(false)
     }
@@ -266,24 +311,36 @@ export default function BetTracker() {
     [bets, year, month]
   )
 
+  const counts = useMemo(() => {
+    let manual = 0, kalshi = 0
+    for (const b of monthBets) (b.source === 'kalshi' ? kalshi++ : manual++)
+    return { manual, kalshi, all: monthBets.length }
+  }, [monthBets])
+
+  // bets visible under the current source tab
+  const viewBets = useMemo(() => {
+    if (sourceTab === 'all') return monthBets
+    return monthBets.filter(b => (sourceTab === 'kalshi' ? b.source === 'kalshi' : b.source !== 'kalshi'))
+  }, [monthBets, sourceTab])
+
   // per-day net P&L (settled only)
   const dayPnl = useMemo(() => {
     const map = {}
-    for (const b of monthBets) {
+    for (const b of viewBets) {
       const day = Number(b.date.split('-')[2])
       map[day] = (map[day] || 0) + betProfit(b)
     }
     return map
-  }, [monthBets])
+  }, [viewBets])
 
   const dayCount = useMemo(() => {
     const map = {}
-    for (const b of monthBets) {
+    for (const b of viewBets) {
       const day = Number(b.date.split('-')[2])
       map[day] = (map[day] || 0) + 1
     }
     return map
-  }, [monthBets])
+  }, [viewBets])
 
   // chart series
   const chartDays = useMemo(() => {
@@ -300,7 +357,7 @@ export default function BetTracker() {
   // summary stats
   const stats = useMemo(() => {
     let wagered = 0, profit = 0, won = 0, lost = 0, settled = 0, pending = 0
-    for (const b of monthBets) {
+    for (const b of viewBets) {
       if (b.result === 'pending') { pending++; continue }
       wagered += b.wager
       profit += betProfit(b)
@@ -314,9 +371,9 @@ export default function BetTracker() {
       winRate: decided ? (won / decided) * 100 : null,
       roi: wagered ? (profit / wagered) * 100 : null,
     }
-  }, [monthBets])
+  }, [viewBets])
 
-  const hasChartData = monthBets.some(b => b.result !== 'pending')
+  const hasChartData = viewBets.some(b => b.result !== 'pending')
 
   function changeMonth(delta) {
     setView(v => {
@@ -417,7 +474,7 @@ export default function BetTracker() {
             date,
             description: (iDesc !== -1 ? row[iDesc] : '').trim() || 'Imported bet',
             sportsbook: (iBook !== -1 ? row[iBook] : '').trim(),
-            wager, odds: String(row[iOdds]).trim(), fmt, dec, result,
+            wager, odds: String(row[iOdds]).trim(), fmt, dec, result, source: 'manual',
           })
         }
         if (!imported.length) { setImportMsg('No valid rows could be imported.'); return }
@@ -439,6 +496,13 @@ export default function BetTracker() {
       <div className="page-header">
         <h1>Bet Tracker</h1>
         <p>Log your bets, see daily profit and loss on a calendar, and chart your results across the month.</p>
+      </div>
+
+      {/* ── Source tabs ── */}
+      <div className="ev-tabs bt-source-tabs">
+        <button className={`ev-tab${sourceTab === 'all' ? ' active' : ''}`} onClick={() => setSourceTab('all')}>All ({counts.all})</button>
+        <button className={`ev-tab${sourceTab === 'manual' ? ' active' : ''}`} onClick={() => setSourceTab('manual')}>Manual ({counts.manual})</button>
+        <button className={`ev-tab${sourceTab === 'kalshi' ? ' active' : ''}`} onClick={() => setSourceTab('kalshi')}>Kalshi ({counts.kalshi})</button>
       </div>
 
       {/* ── Calendar (top) ── */}
@@ -498,6 +562,82 @@ export default function BetTracker() {
         {genMsg && <div className="info-box" style={{ marginTop: 14 }}>{genMsg}</div>}
       </div>
 
+      {/* ── Connect Kalshi ── */}
+      <div className="card">
+        <h2>Connect Kalshi</h2>
+
+        <button className="btn btn-outline btn-sm" style={{ width: 'auto', marginTop: 0 }} onClick={() => setShowTutorial(t => !t)}>
+          {showTutorial ? 'Hide' : 'How do I get my Kalshi API key?'}
+        </button>
+
+        {showTutorial && (
+          <div className="info-box" style={{ marginTop: 14 }}>
+            <strong>Getting your Kalshi API key (one-time, on a computer):</strong>
+            <ol className="bt-steps">
+              <li>Log in to Kalshi in your browser and open <strong>Profile Settings</strong> (<code>kalshi.com/account/profile</code>).</li>
+              <li>Scroll to the <strong>API Keys</strong> section and click <strong>Create New API Key</strong>.</li>
+              <li>Kalshi shows you a <strong>Key ID</strong> and a one-time <strong>Private Key</strong> (and downloads a <code>.txt</code> file). <strong>Copy the private key now</strong> — Kalshi will not show it again.</li>
+              <li>Paste the <strong>Key ID</strong> and the <strong>full private key</strong> (including the <code>-----BEGIN…</code> and <code>-----END…</code> lines) into the boxes below, then click <strong>Save key</strong>.</li>
+            </ol>
+            Lost the private key? Just create a new one — the old one keeps working until you delete it.
+          </div>
+        )}
+
+        {kalshiConnected ? (
+          <div style={{ marginTop: 16 }}>
+            <div className="info-box" style={{ borderColor: 'rgba(63,185,80,0.4)', background: 'rgba(63,185,80,0.08)', color: 'var(--accent-green)' }}>
+              ✓ Kalshi key saved on this device (Key ID ending <strong>…{kKeyId.slice(-6)}</strong>). Your private key never leaves your browser except to sign a sync request.
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+              <button className="btn btn-sm bt-action-btn" onClick={syncKalshi} disabled={syncing}>{syncing ? 'Syncing…' : '🔄 Sync Kalshi bets'}</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { setShowSecret(false); setEditKalshi(true) }}>Replace key</button>
+              <button className="btn btn-outline btn-sm" onClick={removeKalshiKey}>Remove key</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginTop: 16 }}>
+            <div className="field" style={{ marginBottom: 14 }}>
+              <label>Kalshi Key ID</label>
+              <input
+                type={showSecret ? 'text' : 'password'}
+                placeholder="e.g. 1a2b3c4d-…"
+                value={kKeyId}
+                onChange={e => setKKeyId(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+            <div className="field">
+              <label>Kalshi Private Key (PEM)</label>
+              <textarea
+                className="bt-secret"
+                rows={4}
+                placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;…&#10;-----END RSA PRIVATE KEY-----"
+                value={kPriv}
+                onChange={e => setKPriv(e.target.value)}
+                style={!showSecret ? { WebkitTextSecurity: 'disc' } : undefined}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <label className="bt-show-toggle">
+              <input type="checkbox" checked={showSecret} onChange={e => setShowSecret(e.target.checked)} /> Show key while typing
+            </label>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+              <button className="btn btn-sm bt-action-btn" onClick={saveKalshiKey}>Save key</button>
+              {kKeyId && kPriv && localStorage.getItem(KALSHI_KEYID) && (
+                <button className="btn btn-outline btn-sm" onClick={() => { setEditKalshi(false); setShowSecret(false) }}>Cancel</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {syncMsg && <div className="info-box" style={{ marginTop: 14 }}>{syncMsg}</div>}
+
+        <div className="info-box" style={{ marginTop: 14 }}>
+          Your key is stored only in this browser (localStorage). Syncing sends it once to your Firebase Cloud Function (which signs the request and is never stored there) — deploy <code>functions/syncKalshi</code> first; see <strong>KALSHI_SETUP.md</strong>. No backend yet? Use <strong>Import CSV</strong> below instead.
+        </div>
+      </div>
+
       {/* ── Chart ── */}
       <div className="card">
         <div className="bt-month-nav">
@@ -514,22 +654,26 @@ export default function BetTracker() {
 
       {/* ── Bet list ── */}
       <div className="card">
-        <h2>Bets — {MONTHS[month]} {year}</h2>
-        {monthBets.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No bets logged this month.</p>
+        <h2>Bets — {MONTHS[month]} {year}{sourceTab !== 'all' ? ` · ${sourceTab === 'kalshi' ? 'Kalshi' : 'Manual'}` : ''}</h2>
+        {viewBets.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No bets to show under this tab.</p>
         ) : (
           <table className="result-table">
             <thead>
-              <tr><th>Date</th><th>Bet</th><th>Book</th><th>Wager</th><th>Odds</th><th>Result</th><th>P&amp;L</th><th></th></tr>
+              <tr><th>Date</th><th>Bet</th><th>Source</th><th>Wager</th><th>Odds</th><th>Result</th><th>P&amp;L</th><th></th></tr>
             </thead>
             <tbody>
-              {[...monthBets].sort((a, b) => a.date.localeCompare(b.date)).map(b => {
+              {[...viewBets].sort((a, b) => a.date.localeCompare(b.date)).map(b => {
                 const p = betProfit(b)
                 return (
                   <tr key={b.id}>
                     <td>{b.date.slice(5)}</td>
                     <td>{b.description}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>{b.sportsbook || '—'}</td>
+                    <td>
+                      <span className={`badge ${b.source === 'kalshi' ? 'badge-blue' : 'badge-yellow'}`} title={b.sportsbook || ''}>
+                        {b.source === 'kalshi' ? 'Kalshi' : (b.sportsbook || 'Manual')}
+                      </span>
+                    </td>
                     <td>${b.wager.toFixed(2)}</td>
                     <td>{b.odds}</td>
                     <td>
@@ -553,7 +697,6 @@ export default function BetTracker() {
       <div className="card">
         <h2>Import &amp; Export</h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn btn-sm bt-action-btn" onClick={syncKalshi} disabled={syncing}>{syncing ? 'Syncing…' : '🔄 Sync Kalshi'}</button>
           <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
           <button className="btn btn-outline btn-sm" onClick={exportCsv} disabled={bets.length === 0}>Export CSV</button>
           <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
@@ -562,7 +705,7 @@ export default function BetTracker() {
         </div>
         {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
         <div className="info-box" style={{ marginTop: 14 }}>
-          <strong>Sync Kalshi</strong> pulls your settled positions via the Firebase Cloud Function (deploy it first — see KALSHI_SETUP.md). No backend yet? <strong>Import CSV</strong> instead: export your settlement/fills history from Kalshi (or any sportsbook), then import here. The importer matches columns by name — it looks for <strong>date</strong>, <strong>wager</strong> (or stake/amount/cost), and <strong>odds</strong> (or price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong> columns.
+          <strong>Import CSV</strong> works for any sportsbook export (or Kalshi, if you'd rather not connect a key): the importer matches columns by name — <strong>date</strong>, <strong>wager</strong> (or stake/amount/cost), and <strong>odds</strong> (or price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong>. Clear Month / Clear All Bets remove what's stored locally.
         </div>
       </div>
 

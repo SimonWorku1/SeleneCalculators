@@ -1,13 +1,12 @@
 /**
- * Selene Bet Tracker — Kalshi sync backend (scaffold)
+ * Selene Bet Tracker — Kalshi sync backend.
  *
- * This Cloud Function is the small server-side piece that a static site
- * cannot provide on its own: it holds the Kalshi API credentials, performs
- * the required RSA-PSS request signing, calls Kalshi's REST API, and returns
- * the user's settled positions normalized into the tracker's bet shape.
- *
- * The tracker UI is NOT wired to this yet (it still uses localStorage). See
- * KALSHI_SETUP.md for how to deploy this and, later, call it from the app.
+ * A static site can't call Kalshi directly: requests must be RSA-PSS signed,
+ * and browsers are blocked by Kalshi's CORS policy. This Cloud Function is the
+ * thin proxy that solves both. It receives the user's Kalshi credentials in the
+ * call payload (the key is stored locally in the user's browser and sent only
+ * per-sync — never persisted here), signs the requests, calls Kalshi's REST
+ * API, and returns settled positions normalized into the tracker's bet shape.
  *
  * IMPORTANT: Kalshi field names can change between API versions. The
  * normalization in `settlementToBet` is best-effort — verify against the
@@ -15,17 +14,7 @@
  */
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
-const { defineSecret } = require('firebase-functions/params')
 const crypto = require('crypto')
-
-// const admin = require('firebase-admin')
-// admin.initializeApp() // uncomment when you start writing bets to Firestore
-
-// Secrets — set with:
-//   firebase functions:secrets:set KALSHI_KEY_ID
-//   firebase functions:secrets:set KALSHI_PRIVATE_KEY
-const KALSHI_KEY_ID = defineSecret('KALSHI_KEY_ID')
-const KALSHI_PRIVATE_KEY = defineSecret('KALSHI_PRIVATE_KEY')
 
 // Production host. Use https://demo-api.kalshi.co for the sandbox.
 const HOST = 'https://api.elections.kalshi.com'
@@ -33,7 +22,8 @@ const BASE = '/trade-api/v2'
 
 /**
  * Kalshi signs: timestamp(ms) + HTTP method + request path (no query string),
- * using RSA-PSS over SHA-256 with salt length = digest length.
+ * using RSA-PSS over SHA-256 with salt length = digest length. Node's crypto
+ * accepts Kalshi's PKCS#1 ("BEGIN RSA PRIVATE KEY") PEM directly.
  */
 function sign(privateKeyPem, timestamp, method, path) {
   const msg = `${timestamp}${method}${path}`
@@ -101,47 +91,41 @@ function settlementToBet(s) {
     fmt: 'american',
     dec,
     result: pnlCents > 0 ? 'won' : pnlCents < 0 ? 'lost' : 'push',
+    source: 'kalshi',
   }
 }
 
 /**
- * Callable function. From the app (once wired):
- *   import { getFunctions, httpsCallable } from 'firebase/functions'
+ * Callable function. From the app:
  *   const sync = httpsCallable(getFunctions(), 'syncKalshi')
- *   const { data } = await sync()  // -> { bets, count }
+ *   const { data } = await sync({ keyId, privateKey })  // -> { bets, count }
+ *
+ * The credentials are used only to sign this request's calls and are never
+ * stored server-side.
  */
-exports.syncKalshi = onCall(
-  { secrets: [KALSHI_KEY_ID, KALSHI_PRIVATE_KEY], cors: true },
-  async (request) => {
-    // Require a signed-in user once you add Firebase Auth:
-    // if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.')
-
-    const keyId = KALSHI_KEY_ID.value()
-    const privateKey = KALSHI_PRIVATE_KEY.value()
-    if (!keyId || !privateKey) {
-      throw new HttpsError('failed-precondition', 'Kalshi secrets are not configured.')
-    }
-
-    const bets = []
-    let cursor = ''
-    try {
-      for (let page = 0; page < 25; page++) {
-        const qs = `?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-        const data = await kalshiGet(`/portfolio/settlements${qs}`, keyId, privateKey)
-        for (const s of data.settlements || []) {
-          const bet = settlementToBet(s)
-          if (bet) bets.push(bet)
-        }
-        cursor = data.cursor
-        if (!cursor) break
-      }
-    } catch (err) {
-      throw new HttpsError('internal', err.message)
-    }
-
-    // TODO (when wiring storage): persist to Firestore instead of returning,
-    // e.g. users/{request.auth.uid}/bets/{bet.id}, then have the app subscribe.
-
-    return { bets, count: bets.length, syncedAt: new Date().toISOString() }
+exports.syncKalshi = onCall({ cors: true }, async (request) => {
+  const keyId = request.data?.keyId
+  const privateKey = request.data?.privateKey
+  if (!keyId || !privateKey) {
+    throw new HttpsError('invalid-argument', 'Missing Kalshi Key ID or private key.')
   }
-)
+
+  const bets = []
+  let cursor = ''
+  try {
+    for (let page = 0; page < 25; page++) {
+      const qs = `?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+      const data = await kalshiGet(`/portfolio/settlements${qs}`, keyId, privateKey)
+      for (const s of data.settlements || []) {
+        const bet = settlementToBet(s)
+        if (bet) bets.push(bet)
+      }
+      cursor = data.cursor
+      if (!cursor) break
+    }
+  } catch (err) {
+    throw new HttpsError('internal', err.message)
+  }
+
+  return { bets, count: bets.length, syncedAt: new Date().toISOString() }
+})

@@ -1,129 +1,85 @@
-# Kalshi Sync — Firebase Backend Setup
+# Kalshi Sync — Setup
 
-This repo ships a **scaffold** for syncing Kalshi data into the Bet Tracker.
-A static site (GitHub Pages) can't talk to Kalshi directly: every Kalshi API
-request must be **RSA-signed** with a private key that has to stay server-side,
-and the browser is blocked by CORS. The Cloud Function in [`functions/`](functions/)
-is that small server-side piece — it holds the key, signs requests, and returns
-your settled positions.
+The Bet Tracker can pull your settled Kalshi positions onto the calendar and
+chart. A static site (GitHub Pages) can't call Kalshi directly: every request
+must be **RSA-signed**, and browsers are blocked by Kalshi's CORS policy. The
+Cloud Function in [`functions/`](functions/) is a thin proxy that solves both.
 
-> **Status:** backend only. The tracker UI still uses `localStorage` and is
-> **not** wired to this function yet. Steps 1–8 deploy the backend; the
-> "Wiring the app later" section covers connecting the UI.
+**How the key is handled:** you paste your Kalshi key into the tracker's
+**Connect Kalshi** card. It's stored only in your browser (`localStorage`) and
+sent to the Cloud Function **only when you click Sync**, to sign that request.
+The function does **not** store it.
 
----
-
-## What you need
-
-- A Google account.
-- The [Firebase CLI](https://firebase.google.com/docs/cli): `npm install -g firebase-tools`
-- A Kalshi account with API access.
+> The tracker UI (key input, tutorial, tabs, Sync button) already works. To make
+> Sync actually fetch data, deploy the Cloud Function once with the steps below.
 
 ---
 
-## 1. Create a Firebase project
+## A. Get your Kalshi API key (end-user step)
 
-1. Go to <https://console.firebase.google.com> → **Add project**.
-2. Note the **Project ID** (e.g. `selene-tracker-1234`).
-3. Put it in [`.firebaserc`](.firebaserc), replacing `YOUR_FIREBASE_PROJECT_ID`.
+This is also shown in-app under **Connect Kalshi → "How do I get my Kalshi API key?"**
 
-## 2. Upgrade to the Blaze plan (required)
+1. Log in to Kalshi in a browser and open **Profile Settings** (`kalshi.com/account/profile`).
+2. Scroll to **API Keys** → **Create New API Key**.
+3. Copy the **Key ID** and the one-time **Private Key** (`-----BEGIN RSA PRIVATE KEY-----`).
+   Kalshi will not show the private key again.
+4. Paste both into the tracker's **Connect Kalshi** card and click **Save key**.
 
-Cloud Functions can only make outbound calls to a non-Google service (Kalshi)
-on the **Blaze** (pay-as-you-go) plan. The free Spark plan blocks that egress.
-Blaze has a generous free tier — for personal use you'll likely pay ~$0. Set a
-budget alert in the Google Cloud console for peace of mind.
+---
 
-In the Firebase console: **⚙ → Usage and billing → Modify plan → Blaze**.
+## B. Deploy the sync proxy (one-time, developer step)
 
-## 3. Log in and select the project
+Needed once so the **Sync Kalshi bets** button can fetch data.
+
+### 1. Install the Firebase CLI
 
 ```bash
+npm install -g firebase-tools
 firebase login
-firebase use --add        # pick the project you created
 ```
 
-## 4. Generate Kalshi API credentials
+### 2. Confirm the project
 
-1. In Kalshi: **Account → API Keys → Create API Key**.
-2. You get a **Key ID** and a one-time **RSA private key** (`-----BEGIN RSA PRIVATE KEY-----`).
-   Save the private key now — Kalshi will not show it again.
+[`.firebaserc`](.firebaserc) is set to `selenecalculators`. To target a different
+project, edit it or run `firebase use --add`.
 
-## 5. Store the credentials as Firebase secrets
+### 3. Enable the Blaze plan (required)
 
-Never commit these. Store them as managed secrets:
+Cloud Functions can only make outbound calls to a non-Google service (Kalshi) on
+the pay-as-you-go **Blaze** plan; the free Spark plan blocks that egress. Blaze
+has a large free tier — personal use is typically ~$0. Set a budget alert for
+peace of mind. Firebase console: **⚙ → Usage and billing → Modify plan → Blaze**.
 
-```bash
-firebase functions:secrets:set KALSHI_KEY_ID
-#   paste the Key ID when prompted
-
-firebase functions:secrets:set KALSHI_PRIVATE_KEY
-#   paste the full PEM private key (including BEGIN/END lines), then Ctrl-D
-```
-
-## 6. Install dependencies
+### 4. Install deps and deploy
 
 ```bash
-cd functions
-npm install
-cd ..
-```
-
-## 7. (Optional) Test locally
-
-```bash
-firebase emulators:start --only functions
-```
-
-## 8. Deploy
-
-```bash
+cd functions && npm install && cd ..
 firebase deploy --only functions
 ```
 
-You now have a callable function named **`syncKalshi`** that returns:
-
-```json
-{ "bets": [ /* normalized bet objects */ ], "count": 42, "syncedAt": "..." }
-```
-
----
-
-## Wiring the app later
-
-When you're ready to connect the tracker UI:
-
-1. `npm install firebase` in the project root.
-2. Initialize Firebase in the app and add **Auth** (so each user's bets/key are
-   scoped to them). Update [`firestore.rules`](firestore.rules) is already set
-   up for `users/{uid}/bets`.
-3. Call the function and merge results into the tracker:
-
-   ```js
-   import { getFunctions, httpsCallable } from 'firebase/functions'
-
-   const sync = httpsCallable(getFunctions(), 'syncKalshi')
-   const { data } = await sync()      // { bets, count, syncedAt }
-   // de-dupe by bet.id, then save into the tracker's bet list
-   ```
-
-4. Add a **"Sync Kalshi"** button to the tracker's Add Bets / Import section.
-
-To make sync periodic, add a Cloud Scheduler trigger that calls the same logic
-on an interval and writes results to Firestore (`users/{uid}/bets`).
+That deploys the callable **`syncKalshi`** function. It accepts
+`{ keyId, privateKey }`, signs the requests, calls Kalshi
+`/portfolio/settlements`, and returns normalized bets — **no secrets to
+configure**, because the key comes from the client at call time.
 
 ---
 
 ## Notes & caveats
 
+- **No server-side secrets.** Because the key is supplied per-call, you do not
+  run `firebase functions:secrets:set`. The trade-off is the key transits the
+  function (in memory, not stored) when you sync.
 - **Field mapping is best-effort.** `settlementToBet()` in `functions/index.js`
   maps Kalshi's `/portfolio/settlements` fields (`yes_count`, `no_count`,
   `yes_total_cost`, `no_total_cost`, `revenue`, `settled_time`, `ticker`) to the
-  tracker's `{ date, description, wager, odds, result }` shape. Verify against the
-  current API response and adjust if Kalshi changes field names.
+  tracker's `{ date, description, wager, odds, result }` shape. After your first
+  real sync, eyeball the results and adjust if Kalshi has renamed fields.
 - **Odds conversion:** Kalshi contracts pay $1.00 (100¢), so your average fill
   price in cents is the implied probability → decimal odds = `100 / avgPriceCents`.
 - **Sandbox vs production:** switch `HOST` in `functions/index.js` to
   `https://demo-api.kalshi.co` to test against Kalshi's demo environment.
+- **localStorage, not the cloud.** Bets (and your Kalshi key) live in this
+  browser only. Use Export CSV to back up. The included [`firestore.rules`](firestore.rules)
+  are here for a future per-user cloud-storage step, not used yet.
 - **No WebSockets here.** Cloud Functions are short-lived, so this polls the REST
   API. For live `fill`-channel streaming you'd use a long-running host (Cloud Run).
