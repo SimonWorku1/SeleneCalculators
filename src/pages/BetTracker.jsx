@@ -161,6 +161,46 @@ export default function BetTracker() {
       b.id === id ? { ...b, result: order[(order.indexOf(b.result) + 1) % order.length] } : b))
   }
 
+  /* ── random test data ── */
+  function generateTestBets() {
+    const markets = ['Lakers ML', 'Chiefs -3.5', 'Over 47.5', 'Yankees ML', 'Celtics -6',
+      'Warriors +4.5', 'Trump 2028 Nominee', 'Fed cuts rates', 'BTC > $100k EOY',
+      'Real Madrid to win', 'Djokovic to win', 'Under 215.5', 'Eagles ML', 'Bills -7']
+    const books = ['Kalshi', 'DraftKings', 'FanDuel', 'BetMGM', 'Polymarket', 'Caesars']
+    const americanOdds = [-200, -150, -130, -110, +100, +120, +150, +180, +220, +300, -250]
+    const results = ['won', 'won', 'lost', 'lost', 'lost', 'won', 'push', 'pending']
+    const rand = (arr) => arr[Math.floor(Math.random() * arr.length)]
+
+    const count = 12 + Math.floor(Math.random() * 9) // 12–20 bets
+    const made = []
+    for (let i = 0; i < count; i++) {
+      const day = 1 + Math.floor(Math.random() * daysInMonth)
+      const odds = rand(americanOdds)
+      const wager = Math.round((5 + Math.random() * 195) / 5) * 5 // $5–$200, step 5
+      made.push({
+        id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random() + i),
+        date: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+        description: rand(markets),
+        sportsbook: rand(books),
+        wager,
+        odds: (odds > 0 ? '+' : '') + odds,
+        fmt: 'american',
+        dec: toDecimal(odds, 'american'),
+        result: rand(results),
+      })
+    }
+    setBets(prev => [...prev, ...made])
+    setImportMsg(`Added ${count} random test bets to ${MONTHS[month]} ${year}.`)
+  }
+
+  function clearMonth() {
+    if (!monthBets.length) return
+    if (!window.confirm(`Delete all ${monthBets.length} bets in ${MONTHS[month]} ${year}?`)) return
+    const ids = new Set(monthBets.map(b => b.id))
+    setBets(prev => prev.filter(b => !ids.has(b.id)))
+    setImportMsg(`Cleared ${MONTHS[month]} ${year}.`)
+  }
+
   /* ── month math ── */
   const { year, month } = view
   const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -496,6 +536,8 @@ export default function BetTracker() {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
           <button className="btn btn-outline btn-sm" onClick={exportCsv} disabled={bets.length === 0}>Export CSV</button>
+          <button className="btn btn-outline btn-sm" onClick={generateTestBets}>🎲 Generate Test Bets</button>
+          <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importCsv} style={{ display: 'none' }} />
         </div>
         {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
