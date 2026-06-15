@@ -234,7 +234,7 @@ export default function BetTracker() {
     if (!window.confirm(`Delete all ${monthBets.length} bets in ${MONTHS[month]} ${year}?`)) return
     const ids = new Set(monthBets.map(b => b.id))
     setBets(prev => prev.filter(b => !ids.has(b.id)))
-    setImportMsg(`Cleared ${MONTHS[month]} ${year}.`)
+    setGenMsg(`Cleared ${MONTHS[month]} ${year}.`)
   }
 
   function clearAll() {
@@ -558,6 +558,7 @@ export default function BetTracker() {
         <div className="bt-add-actions">
           <button className="btn btn-sm bt-action-btn" onClick={() => { setError(''); setForm(f => ({ ...f, date: todayISO() })); setShowManual(true) }}>+ Add Manual Bet</button>
           <button className="btn btn-outline btn-sm bt-action-btn" onClick={generateTestBets}>🎲 Add Random Bets (~5/day)</button>
+          <button className="btn btn-outline btn-sm bt-action-btn" onClick={clearMonth} disabled={monthBets.length === 0}>🗑 Clear Month</button>
           <div className="field" style={{ maxWidth: 170 }}>
             <label>Random bet EV (ROI %)</label>
             <input type="number" step="any" placeholder="5" value={testEv} onChange={e => setTestEv(e.target.value)} />
