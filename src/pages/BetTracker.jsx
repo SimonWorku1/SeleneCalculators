@@ -120,7 +120,9 @@ export default function BetTracker() {
   })
   const [error, setError] = useState('')
   const [importMsg, setImportMsg] = useState('')
-  const [testEv, setTestEv] = useState('0')
+  const [genMsg, setGenMsg] = useState('')
+  const [testEv, setTestEv] = useState('5')
+  const [showManual, setShowManual] = useState(false)
   const fileRef = useRef(null)
 
   // persist
@@ -150,6 +152,7 @@ export default function BetTracker() {
     }
     setBets(prev => [...prev, bet])
     setForm(f => ({ ...f, description: '', wager: '', odds: '' }))
+    setShowManual(false)
   }
 
   function removeBet(id) {
@@ -176,34 +179,37 @@ export default function BetTracker() {
     // EV = p·dec − 1. ~12% of bets are left pending and don't count toward P&L.
     const targetRoi = (parseFloat(testEv) || 0) / 100
 
-    const count = 12 + Math.floor(Math.random() * 9) // 12–20 bets
     const made = []
-    for (let i = 0; i < count; i++) {
-      const day = 1 + Math.floor(Math.random() * daysInMonth)
-      const odds = rand(americanOdds)
-      const dec = toDecimal(odds, 'american')
-      const wager = Math.round((5 + Math.random() * 195) / 5) * 5 // $5–$200, step 5
-      let result
-      if (Math.random() < 0.12) result = 'pending'
-      else {
-        const p = Math.min(0.97, Math.max(0.03, (targetRoi + 1) / dec))
-        result = Math.random() < p ? 'won' : 'lost'
+    let seq = 0
+    // ~5 bets for every day of the month
+    for (let day = 1; day <= daysInMonth; day++) {
+      const perDay = 4 + Math.floor(Math.random() * 3) // 4–6 bets/day
+      for (let j = 0; j < perDay; j++) {
+        const odds = rand(americanOdds)
+        const dec = toDecimal(odds, 'american')
+        const wager = Math.round((5 + Math.random() * 195) / 5) * 5 // $5–$200, step 5
+        let result
+        if (Math.random() < 0.12) result = 'pending'
+        else {
+          const p = Math.min(0.97, Math.max(0.03, (targetRoi + 1) / dec))
+          result = Math.random() < p ? 'won' : 'lost'
+        }
+        made.push({
+          id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random() + seq++),
+          date: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+          description: rand(markets),
+          sportsbook: rand(books),
+          wager,
+          odds: (odds > 0 ? '+' : '') + odds,
+          fmt: 'american',
+          dec,
+          result,
+        })
       }
-      made.push({
-        id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random() + i),
-        date: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-        description: rand(markets),
-        sportsbook: rand(books),
-        wager,
-        odds: (odds > 0 ? '+' : '') + odds,
-        fmt: 'american',
-        dec,
-        result,
-      })
     }
     setBets(prev => [...prev, ...made])
     const evLabel = targetRoi === 0 ? 'break-even' : `${targetRoi > 0 ? '+' : ''}${(targetRoi * 100).toFixed(0)}% EV`
-    setImportMsg(`Added ${count} random test bets (${evLabel}) to ${MONTHS[month]} ${year}.`)
+    setGenMsg(`Added ${made.length} random test bets (${evLabel}, ~5/day) to ${MONTHS[month]} ${year}.`)
   }
 
   function clearMonth() {
@@ -402,66 +408,7 @@ export default function BetTracker() {
         <p>Log your bets, see daily profit and loss on a calendar, and chart your results across the month.</p>
       </div>
 
-      {/* ── Summary ── */}
-      <div className="card">
-        <h2>{MONTHS[month]} {year} — Summary</h2>
-        <div className="result-grid">
-          <div className="result-item"><div className="label">Net P&amp;L</div><div className={`value ${stats.profit >= 0 ? 'green' : 'red'}`}>{money(stats.profit)}</div></div>
-          <div className="result-item"><div className="label">Total Wagered</div><div className="value">${stats.wagered.toFixed(2)}</div></div>
-          <div className="result-item"><div className="label">ROI</div><div className={`value ${(stats.roi ?? 0) >= 0 ? 'green' : 'red'}`}>{stats.roi === null ? '—' : `${stats.roi >= 0 ? '+' : ''}${stats.roi.toFixed(1)}%`}</div></div>
-          <div className="result-item"><div className="label">Win Rate</div><div className="value blue">{stats.winRate === null ? '—' : `${stats.winRate.toFixed(0)}%`}</div></div>
-          <div className="result-item"><div className="label">Record (W-L)</div><div className="value yellow">{stats.won}–{stats.lost}{stats.pending ? ` · ${stats.pending} open` : ''}</div></div>
-        </div>
-      </div>
-
-      {/* ── Add bet ── */}
-      <div className="card">
-        <h2>Add a Bet</h2>
-        <div className="format-toggle">
-          {['american', 'decimal'].map(f => (
-            <button key={f} type="button" className={`format-btn${oddsFmt === f ? ' active' : ''}`} onClick={() => setOddsFmt(f)}>
-              {f.charAt(0).toUpperCase() + f.slice(1)} odds
-            </button>
-          ))}
-        </div>
-        <form onSubmit={addBet}>
-          <div className="field-group">
-            <div className="field">
-              <label>Date</label>
-              <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-            </div>
-            <div className="field">
-              <label>Bet / Market</label>
-              <input type="text" placeholder="e.g. Lakers ML" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-            </div>
-            <div className="field">
-              <label>Sportsbook / Platform</label>
-              <input type="text" placeholder="e.g. Kalshi, DraftKings" value={form.sportsbook} onChange={e => setForm(f => ({ ...f, sportsbook: e.target.value }))} />
-            </div>
-            <div className="field">
-              <label>Wager ($)</label>
-              <input type="number" placeholder="100" min="0.01" step="0.01" value={form.wager} onChange={e => setForm(f => ({ ...f, wager: e.target.value }))} />
-            </div>
-            <div className="field">
-              <label>Odds</label>
-              <input type="number" placeholder={oddsFmt === 'american' ? '-110' : '1.91'} step="any" value={form.odds} onChange={e => setForm(f => ({ ...f, odds: e.target.value }))} />
-            </div>
-            <div className="field">
-              <label>Result</label>
-              <select value={form.result} onChange={e => setForm(f => ({ ...f, result: e.target.value }))}>
-                <option value="pending">Pending</option>
-                <option value="won">Won</option>
-                <option value="lost">Lost</option>
-                <option value="push">Push / Void</option>
-              </select>
-            </div>
-          </div>
-          {error && <div className="info-box" style={{ borderColor: 'rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.08)', color: 'var(--accent-red)' }}>{error}</div>}
-          <button className="btn" type="submit">Add Bet</button>
-        </form>
-      </div>
-
-      {/* ── Calendar ── */}
+      {/* ── Calendar (top) ── */}
       <div className="card">
         <div className="bt-month-nav">
           <button className="btn btn-outline btn-sm" onClick={() => changeMonth(-1)}>← Prev</button>
@@ -490,6 +437,32 @@ export default function BetTracker() {
             )
           })}
         </div>
+      </div>
+
+      {/* ── Summary ── */}
+      <div className="card">
+        <h2>{MONTHS[month]} {year} — Summary</h2>
+        <div className="result-grid">
+          <div className="result-item"><div className="label">Net P&amp;L</div><div className={`value ${stats.profit >= 0 ? 'green' : 'red'}`}>{money(stats.profit)}</div></div>
+          <div className="result-item"><div className="label">Total Wagered</div><div className="value">${stats.wagered.toFixed(2)}</div></div>
+          <div className="result-item"><div className="label">ROI</div><div className={`value ${(stats.roi ?? 0) >= 0 ? 'green' : 'red'}`}>{stats.roi === null ? '—' : `${stats.roi >= 0 ? '+' : ''}${stats.roi.toFixed(1)}%`}</div></div>
+          <div className="result-item"><div className="label">Win Rate</div><div className="value blue">{stats.winRate === null ? '—' : `${stats.winRate.toFixed(0)}%`}</div></div>
+          <div className="result-item"><div className="label">Record (W-L)</div><div className="value yellow">{stats.won}–{stats.lost}{stats.pending ? ` · ${stats.pending} open` : ''}</div></div>
+        </div>
+      </div>
+
+      {/* ── Add bets ── */}
+      <div className="card">
+        <h2>Add Bets</h2>
+        <div className="bt-add-actions">
+          <button className="btn btn-sm bt-action-btn" onClick={() => { setError(''); setForm(f => ({ ...f, date: todayISO() })); setShowManual(true) }}>+ Add Manual Bet</button>
+          <button className="btn btn-outline btn-sm bt-action-btn" onClick={generateTestBets}>🎲 Add Random Bets (~5/day)</button>
+          <div className="field" style={{ maxWidth: 170 }}>
+            <label>Random bet EV (ROI %)</label>
+            <input type="number" step="any" placeholder="5" value={testEv} onChange={e => setTestEv(e.target.value)} />
+          </div>
+        </div>
+        {genMsg && <div className="info-box" style={{ marginTop: 14 }}>{genMsg}</div>}
       </div>
 
       {/* ── Chart ── */}
@@ -549,16 +522,8 @@ export default function BetTracker() {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
           <button className="btn btn-outline btn-sm" onClick={exportCsv} disabled={bets.length === 0}>Export CSV</button>
-          <button className="btn btn-outline btn-sm" onClick={generateTestBets}>🎲 Generate Test Bets</button>
           <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importCsv} style={{ display: 'none' }} />
-        </div>
-        <div className="field" style={{ marginTop: 14, maxWidth: 260 }}>
-          <label>Target EV for test bets (ROI %)</label>
-          <input type="number" step="any" placeholder="0" value={testEv} onChange={e => setTestEv(e.target.value)} />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Positive trends winning, negative trends losing, 0 ≈ break-even.
-          </span>
         </div>
         {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
         <div className="info-box" style={{ marginTop: 14 }}>
@@ -574,6 +539,60 @@ export default function BetTracker() {
           <div><strong style={{ color: 'var(--text)' }}>Quick edits</strong><br />Click any result badge in the table to cycle Pending → Won → Lost → Push.</div>
         </div>
       </div>
+
+      {/* ── Manual entry modal ── */}
+      {showManual && (
+        <div className="bt-modal-overlay" onClick={() => setShowManual(false)}>
+          <div className="bt-modal card" onClick={e => e.stopPropagation()}>
+            <div className="bt-month-nav">
+              <h2 style={{ margin: 0 }}>Add a Manual Bet</h2>
+              <button className="bt-del" style={{ fontSize: 18 }} onClick={() => setShowManual(false)} title="Close">✕</button>
+            </div>
+            <div className="format-toggle">
+              {['american', 'decimal'].map(f => (
+                <button key={f} type="button" className={`format-btn${oddsFmt === f ? ' active' : ''}`} onClick={() => setOddsFmt(f)}>
+                  {f.charAt(0).toUpperCase() + f.slice(1)} odds
+                </button>
+              ))}
+            </div>
+            <form onSubmit={addBet}>
+              <div className="field-group">
+                <div className="field">
+                  <label>Date</label>
+                  <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Bet / Market</label>
+                  <input type="text" placeholder="e.g. Lakers ML" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Sportsbook / Platform</label>
+                  <input type="text" placeholder="e.g. Kalshi, DraftKings" value={form.sportsbook} onChange={e => setForm(f => ({ ...f, sportsbook: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Wager ($)</label>
+                  <input type="number" placeholder="100" min="0.01" step="0.01" value={form.wager} onChange={e => setForm(f => ({ ...f, wager: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Odds</label>
+                  <input type="number" placeholder={oddsFmt === 'american' ? '-110' : '1.91'} step="any" value={form.odds} onChange={e => setForm(f => ({ ...f, odds: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Result</label>
+                  <select value={form.result} onChange={e => setForm(f => ({ ...f, result: e.target.value }))}>
+                    <option value="pending">Pending</option>
+                    <option value="won">Won</option>
+                    <option value="lost">Lost</option>
+                    <option value="push">Push / Void</option>
+                  </select>
+                </div>
+              </div>
+              {error && <div className="info-box" style={{ borderColor: 'rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.08)', color: 'var(--accent-red)' }}>{error}</div>}
+              <button className="btn" type="submit">Add Bet</button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
