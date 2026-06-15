@@ -220,6 +220,13 @@ export default function BetTracker() {
     setImportMsg(`Cleared ${MONTHS[month]} ${year}.`)
   }
 
+  function clearAll() {
+    if (!bets.length) return
+    if (!window.confirm(`Delete ALL ${bets.length} bets across every month? This cannot be undone.`)) return
+    setBets([])
+    setImportMsg('Cleared all bets.')
+  }
+
   /* ── month math ── */
   const { year, month } = view
   const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -523,6 +530,7 @@ export default function BetTracker() {
           <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
           <button className="btn btn-outline btn-sm" onClick={exportCsv} disabled={bets.length === 0}>Export CSV</button>
           <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
+          <button className="btn btn-outline btn-sm" onClick={clearAll} disabled={bets.length === 0}>Clear All Bets</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importCsv} style={{ display: 'none' }} />
         </div>
         {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
