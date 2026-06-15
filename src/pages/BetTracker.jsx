@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { httpsCallable } from 'firebase/functions'
-import { functions } from '../firebase.js'
+// Firebase is imported lazily inside syncKalshi() so the localStorage-only
+// tracker loads without the Firebase SDK (and without it installed).
 
 const STORAGE_KEY = 'selene_bets'
 const KALSHI_KEYID = 'selene_kalshi_key_id'
@@ -278,6 +278,10 @@ export default function BetTracker() {
     setSyncing(true)
     setSyncMsg('Syncing from Kalshi…')
     try {
+      const [{ httpsCallable }, { functions }] = await Promise.all([
+        import('firebase/functions'),
+        import('../firebase.js'),
+      ])
       const fn = httpsCallable(functions, 'syncKalshi')
       const { data } = await fn({ keyId: kKeyId, privateKey: kPriv })
       const incoming = Array.isArray(data?.bets) ? data.bets : []
