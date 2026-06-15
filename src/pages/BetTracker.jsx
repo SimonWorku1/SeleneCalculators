@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { httpsCallable } from 'firebase/functions'
+import { functions } from '../firebase.js'
 
 const STORAGE_KEY = 'selene_bets'
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -123,6 +125,7 @@ export default function BetTracker() {
   const [genMsg, setGenMsg] = useState('')
   const [testEv, setTestEv] = useState('5')
   const [showManual, setShowManual] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const fileRef = useRef(null)
 
   // persist
@@ -225,6 +228,29 @@ export default function BetTracker() {
     if (!window.confirm(`Delete ALL ${bets.length} bets across every month? This cannot be undone.`)) return
     setBets([])
     setImportMsg('Cleared all bets.')
+  }
+
+  /* ── Kalshi sync (via Firebase Cloud Function) ── */
+  async function syncKalshi() {
+    setSyncing(true)
+    setImportMsg('Syncing from Kalshi…')
+    try {
+      const fn = httpsCallable(functions, 'syncKalshi')
+      const { data } = await fn()
+      const incoming = Array.isArray(data?.bets) ? data.bets : []
+      let added = 0
+      setBets(prev => {
+        const ids = new Set(prev.map(b => b.id))
+        const fresh = incoming.filter(b => b && b.id && !ids.has(b.id))
+        added = fresh.length
+        return [...prev, ...fresh]
+      })
+      setImportMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} (${incoming.length} returned).`)
+    } catch (e) {
+      setImportMsg(`Kalshi sync failed: ${e.message}. The syncKalshi Cloud Function must be deployed first — see KALSHI_SETUP.md.`)
+    } finally {
+      setSyncing(false)
+    }
   }
 
   /* ── month math ── */
@@ -527,6 +553,7 @@ export default function BetTracker() {
       <div className="card">
         <h2>Import &amp; Export</h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn btn-sm bt-action-btn" onClick={syncKalshi} disabled={syncing}>{syncing ? 'Syncing…' : '🔄 Sync Kalshi'}</button>
           <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
           <button className="btn btn-outline btn-sm" onClick={exportCsv} disabled={bets.length === 0}>Export CSV</button>
           <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
@@ -535,7 +562,7 @@ export default function BetTracker() {
         </div>
         {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
         <div className="info-box" style={{ marginTop: 14 }}>
-          <strong>Kalshi &amp; CSV import:</strong> Export your settlement/fills history from Kalshi (or any sportsbook) as CSV, then import it here. The importer matches columns by name — it looks for <strong>date</strong>, <strong>wager</strong> (or stake/amount/cost), and <strong>odds</strong> (or price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong> columns. Live auto-sync via the Kalshi API requires a signing backend and can be added later.
+          <strong>Sync Kalshi</strong> pulls your settled positions via the Firebase Cloud Function (deploy it first — see KALSHI_SETUP.md). No backend yet? <strong>Import CSV</strong> instead: export your settlement/fills history from Kalshi (or any sportsbook), then import here. The importer matches columns by name — it looks for <strong>date</strong>, <strong>wager</strong> (or stake/amount/cost), and <strong>odds</strong> (or price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong> columns.
         </div>
       </div>
 
