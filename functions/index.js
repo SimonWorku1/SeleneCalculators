@@ -6,11 +6,13 @@
  * thin proxy that solves both. It receives the user's Kalshi credentials in the
  * call payload (the key is stored locally in the user's browser and sent only
  * per-sync — never persisted here), signs the requests, calls Kalshi's REST
- * API, and returns settled positions normalized into the tracker's bet shape.
+ * API, and returns settled *and* still-open positions normalized into the
+ * tracker's bet shape (open positions come back tagged `result: 'pending'`).
  *
  * IMPORTANT: Kalshi field names can change between API versions. The
- * normalization in `settlementToBet` is best-effort — verify against the
- * current /portfolio/settlements response and adjust as needed.
+ * normalization in `settlementToBet` / `positionToBet` is best-effort —
+ * verify against the current /portfolio/settlements and /portfolio/positions
+ * responses and adjust as needed.
  *
  * ⚠️ TODO before a real/public launch: this function's Cloud Run service is
  * currently deployed with "Allow public access" (unauthenticated invocation)
@@ -63,6 +65,18 @@ async function kalshiGet(pathWithQuery, keyId, privateKey) {
   return res.json()
 }
 
+// Walks a cursor-paginated Kalshi endpoint, calling onPage(data) for each page.
+async function paginate(path, keyId, privateKey, onPage) {
+  let cursor = ''
+  for (let page = 0; page < 25; page++) {
+    const qs = `?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+    const data = await kalshiGet(`${path}${qs}`, keyId, privateKey)
+    onPage(data)
+    cursor = data.cursor
+    if (!cursor) break
+  }
+}
+
 // Decimal odds -> American odds integer.
 function americanFromDecimal(dec) {
   if (!isFinite(dec) || dec <= 1) return 0
@@ -90,6 +104,7 @@ function settlementToBet(s) {
 
   return {
     id: `kalshi-${s.ticker}-${s.settled_time}`,
+    ticker: s.ticker,
     date: String(s.settled_time || '').slice(0, 10),
     description: `${s.ticker} (${side})`,
     sportsbook: 'Kalshi',
@@ -98,6 +113,40 @@ function settlementToBet(s) {
     fmt: 'american',
     dec,
     result: pnlCents > 0 ? 'won' : pnlCents < 0 ? 'lost' : 'push',
+    source: 'kalshi',
+  }
+}
+
+/**
+ * Map one still-open Kalshi position (not yet settled) to the tracker's bet
+ * shape, tagged `result: 'pending'`. Field names are best-effort, same
+ * caveat as settlementToBet — verify against a real /portfolio/positions
+ * response and adjust if Kalshi has renamed fields. `position` is a signed
+ * contract count (positive = net long YES, negative = net long NO);
+ * `market_exposure` is the cost basis in cents.
+ */
+function positionToBet(p) {
+  const signedCount = p.position || 0
+  const contracts = Math.abs(signedCount)
+  const costCents = Math.abs(p.market_exposure || 0)
+  if (contracts <= 0 || costCents <= 0) return null
+
+  const side = signedCount >= 0 ? 'YES' : 'NO'
+  const avgPriceCents = costCents / contracts
+  const dec = 100 / avgPriceCents
+  const american = americanFromDecimal(dec)
+
+  return {
+    id: `kalshi-open-${p.ticker}`,
+    ticker: p.ticker,
+    date: String(p.last_updated_ts || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+    description: `${p.ticker} (${side})`,
+    sportsbook: 'Kalshi',
+    wager: +(costCents / 100).toFixed(2),
+    odds: (american > 0 ? '+' : '') + american,
+    fmt: 'american',
+    dec,
+    result: 'pending',
     source: 'kalshi',
   }
 }
@@ -118,18 +167,21 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   }
 
   const bets = []
-  let cursor = ''
   try {
-    for (let page = 0; page < 25; page++) {
-      const qs = `?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-      const data = await kalshiGet(`/portfolio/settlements${qs}`, keyId, privateKey)
+    await paginate('/portfolio/settlements', keyId, privateKey, (data) => {
       for (const s of data.settlements || []) {
         const bet = settlementToBet(s)
         if (bet) bets.push(bet)
       }
-      cursor = data.cursor
-      if (!cursor) break
-    }
+    })
+    // Open (not yet settled) positions, so a bet shows up as "pending"
+    // immediately instead of waiting for the market to resolve.
+    await paginate('/portfolio/positions', keyId, privateKey, (data) => {
+      for (const p of data.market_positions || []) {
+        const bet = positionToBet(p)
+        if (bet) bets.push(bet)
+      }
+    })
   } catch (err) {
     throw new HttpsError('internal', err.message)
   }

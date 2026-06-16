@@ -287,12 +287,21 @@ export default function BetTracker() {
       const incoming = Array.isArray(data?.bets) ? data.bets : []
       let added = 0
       setBets(prev => {
-        const ids = new Set(prev.map(b => b.id))
+        // A position that was "pending" in a prior sync now has a settled
+        // result for the same ticker — drop the old placeholder so it
+        // doesn't linger as a duplicate alongside the real settled bet.
+        const settledTickers = new Set(
+          incoming.filter(b => b.result !== 'pending' && b.ticker).map(b => b.ticker)
+        )
+        const withoutStalePending = prev.filter(
+          b => !(b.source === 'kalshi' && b.result === 'pending' && settledTickers.has(b.ticker))
+        )
+        const ids = new Set(withoutStalePending.map(b => b.id))
         const fresh = incoming
           .filter(b => b && b.id && !ids.has(b.id))
           .map(b => ({ ...b, source: 'kalshi' }))
         added = fresh.length
-        return [...prev, ...fresh]
+        return [...withoutStalePending, ...fresh]
       })
       setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned).`)
     } catch (e) {
@@ -342,6 +351,19 @@ export default function BetTracker() {
     for (const b of viewBets) {
       const day = Number(b.date.split('-')[2])
       map[day] = (map[day] || 0) + 1
+    }
+    return map
+  }, [viewBets])
+
+  // per-day pending (unsettled) bet count + amount risked
+  const dayPending = useMemo(() => {
+    const map = {}
+    for (const b of viewBets) {
+      if (b.result !== 'pending') continue
+      const day = Number(b.date.split('-')[2])
+      if (!map[day]) map[day] = { count: 0, wager: 0 }
+      map[day].count += 1
+      map[day].wager += b.wager
     }
     return map
   }, [viewBets])
@@ -538,6 +560,34 @@ export default function BetTracker() {
             )
           })}
         </div>
+      </div>
+
+      {/* ── Pending bets calendar ── */}
+      <div className="card">
+        <h2>Pending Bets — {MONTHS[month]} {year}</h2>
+        <div className="bt-calendar">
+          {WEEKDAYS.map(w => <div key={w} className="bt-weekday">{w}</div>)}
+          {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pe${i}`} className="bt-cell empty" />)}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const day = i + 1
+            const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+            const p = dayPending[day]
+            return (
+              <div key={day} className={`bt-cell${iso === todayStr ? ' today' : ''}${p ? ' pending' : ''}`}>
+                <div className="bt-day-num">{day}</div>
+                {p && (
+                  <>
+                    <div className="bt-day-pnl blue">{p.count} open</div>
+                    <div className="bt-day-count">${p.wager.toFixed(0)} risked</div>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {stats.pending === 0 && (
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 12 }}>No pending bets this month.</p>
+        )}
       </div>
 
       {/* ── Summary ── */}

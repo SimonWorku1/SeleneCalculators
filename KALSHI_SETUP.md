@@ -64,8 +64,9 @@ firebase deploy --only functions
 
 That deploys the callable **`syncKalshi`** function. It accepts
 `{ keyId, privateKey }`, signs the requests, calls Kalshi
-`/portfolio/settlements`, and returns normalized bets — **no secrets to
-configure**, because the key comes from the client at call time.
+`/portfolio/settlements` (resolved bets) and `/portfolio/positions` (still-open
+bets, returned as `result: 'pending'`), and returns normalized bets — **no
+secrets to configure**, because the key comes from the client at call time.
 
 ---
 
@@ -91,6 +92,13 @@ configure**, because the key comes from the client at call time.
   `yes_total_cost`, `no_total_cost`, `revenue`, `settled_time`, `ticker`) to the
   tracker's `{ date, description, wager, odds, result }` shape. After your first
   real sync, eyeball the results and adjust if Kalshi has renamed fields.
+- **Open bets sync as "pending."** `positionToBet()` maps `/portfolio/positions`
+  (`position`, `market_exposure`, `ticker`, `last_updated_ts`) the same
+  best-effort way, tagged `result: 'pending'`, so a bet you've placed shows up
+  immediately instead of waiting for the market to settle. The Bet Tracker UI
+  shows a dedicated **Pending Bets** calendar for these. Each sync drops the
+  open-position placeholder for any ticker that now has a real settlement, so
+  it doesn't linger as a duplicate once the bet resolves.
 - **Odds conversion:** Kalshi contracts pay $1.00 (100¢), so your average fill
   price in cents is the implied probability → decimal odds = `100 / avgPriceCents`.
 - **Sandbox vs production:** switch `HOST` in `functions/index.js` to
