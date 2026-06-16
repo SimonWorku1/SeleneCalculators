@@ -167,9 +167,18 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   }
 
   const bets = []
+  // TEMP debug counters — remove once positions sync is confirmed working
+  // against a real account. Lets us see what Kalshi actually returned
+  // without needing server log access.
+  let settlementsSeen = 0
+  let positionsSeen = 0
+  let sampleSettlement = null
+  let samplePosition = null
   try {
     await paginate('/portfolio/settlements', keyId, privateKey, (data) => {
       for (const s of data.settlements || []) {
+        settlementsSeen++
+        if (!sampleSettlement) sampleSettlement = s
         const bet = settlementToBet(s)
         if (bet) bets.push(bet)
       }
@@ -180,6 +189,8 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     // position (otherwise Kalshi returns every market ever traded).
     await paginate('/portfolio/positions', keyId, privateKey, (data) => {
       for (const p of data.market_positions || []) {
+        positionsSeen++
+        if (!samplePosition) samplePosition = p
         const bet = positionToBet(p)
         if (bet) bets.push(bet)
       }
@@ -188,5 +199,10 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     throw new HttpsError('internal', err.message)
   }
 
-  return { bets, count: bets.length, syncedAt: new Date().toISOString() }
+  return {
+    bets,
+    count: bets.length,
+    syncedAt: new Date().toISOString(),
+    debug: { settlementsSeen, positionsSeen, sampleSettlement, samplePosition },
+  }
 })
