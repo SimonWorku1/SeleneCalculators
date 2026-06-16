@@ -66,10 +66,10 @@ async function kalshiGet(pathWithQuery, keyId, privateKey) {
 }
 
 // Walks a cursor-paginated Kalshi endpoint, calling onPage(data) for each page.
-async function paginate(path, keyId, privateKey, onPage) {
+async function paginate(path, keyId, privateKey, onPage, extraQs = '') {
   let cursor = ''
   for (let page = 0; page < 25; page++) {
-    const qs = `?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+    const qs = `?limit=200${extraQs}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
     const data = await kalshiGet(`${path}${qs}`, keyId, privateKey)
     onPage(data)
     cursor = data.cursor
@@ -119,20 +119,20 @@ function settlementToBet(s) {
 
 /**
  * Map one still-open Kalshi position (not yet settled) to the tracker's bet
- * shape, tagged `result: 'pending'`. Field names are best-effort, same
- * caveat as settlementToBet — verify against a real /portfolio/positions
- * response and adjust if Kalshi has renamed fields. `position` is a signed
- * contract count (positive = net long YES, negative = net long NO);
- * `market_exposure` is the cost basis in cents.
+ * shape, tagged `result: 'pending'`. Per Kalshi's GetPositions schema,
+ * `position_fp` is a signed fixed-point contract count as a numeric string
+ * (positive = net long YES, negative = net long NO) and
+ * `market_exposure_dollars` is the cost basis already in dollars (not
+ * cents) as a numeric string.
  */
 function positionToBet(p) {
-  const signedCount = p.position || 0
+  const signedCount = parseFloat(p.position_fp || 0)
   const contracts = Math.abs(signedCount)
-  const costCents = Math.abs(p.market_exposure || 0)
-  if (contracts <= 0 || costCents <= 0) return null
+  const costDollars = Math.abs(parseFloat(p.market_exposure_dollars || 0))
+  if (contracts <= 0 || costDollars <= 0) return null
 
   const side = signedCount >= 0 ? 'YES' : 'NO'
-  const avgPriceCents = costCents / contracts
+  const avgPriceCents = (costDollars * 100) / contracts // 1..99
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
 
@@ -142,7 +142,7 @@ function positionToBet(p) {
     date: String(p.last_updated_ts || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
     description: `${p.ticker} (${side})`,
     sportsbook: 'Kalshi',
-    wager: +(costCents / 100).toFixed(2),
+    wager: +costDollars.toFixed(2),
     odds: (american > 0 ? '+' : '') + american,
     fmt: 'american',
     dec,
@@ -176,12 +176,14 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     })
     // Open (not yet settled) positions, so a bet shows up as "pending"
     // immediately instead of waiting for the market to resolve.
+    // count_filter=position restricts results to markets with a non-zero
+    // position (otherwise Kalshi returns every market ever traded).
     await paginate('/portfolio/positions', keyId, privateKey, (data) => {
       for (const p of data.market_positions || []) {
         const bet = positionToBet(p)
         if (bet) bets.push(bet)
       }
-    })
+    }, '&count_filter=position')
   } catch (err) {
     throw new HttpsError('internal', err.message)
   }

@@ -93,12 +93,13 @@ secrets to configure**, because the key comes from the client at call time.
   tracker's `{ date, description, wager, odds, result }` shape. After your first
   real sync, eyeball the results and adjust if Kalshi has renamed fields.
 - **Open bets sync as "pending."** `positionToBet()` maps `/portfolio/positions`
-  (`position`, `market_exposure`, `ticker`, `last_updated_ts`) the same
-  best-effort way, tagged `result: 'pending'`, so a bet you've placed shows up
-  immediately instead of waiting for the market to settle. The Bet Tracker UI
-  shows a dedicated **Pending Bets** calendar for these. Each sync drops the
-  open-position placeholder for any ticker that now has a real settlement, so
-  it doesn't linger as a duplicate once the bet resolves.
+  (`position_fp`, `market_exposure_dollars`, `ticker`, `last_updated_ts` — per
+  Kalshi's GetPositions schema; note `market_exposure_dollars` is already in
+  dollars, not cents) tagged `result: 'pending'`, so a bet you've placed shows
+  up immediately instead of waiting for the market to settle. The Bet Tracker
+  UI shows a dedicated **Pending Bets** calendar for these. Each sync drops
+  the open-position placeholder for any ticker that now has a real
+  settlement, so it doesn't linger as a duplicate once the bet resolves.
 - **Odds conversion:** Kalshi contracts pay $1.00 (100¢), so your average fill
   price in cents is the implied probability → decimal odds = `100 / avgPriceCents`.
 - **Sandbox vs production:** switch `HOST` in `functions/index.js` to
