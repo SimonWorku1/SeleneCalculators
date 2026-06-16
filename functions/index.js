@@ -72,10 +72,42 @@ async function paginate(path, keyId, privateKey, onPage, extraQs = '') {
   for (let page = 0; page < 25; page++) {
     const qs = `?limit=200${extraQs}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
     const data = await kalshiGet(`${path}${qs}`, keyId, privateKey)
-    onPage(data)
+    await onPage(data)
     cursor = data.cursor
     if (!cursor) break
   }
+}
+
+/**
+ * GetMarket — `/markets/{ticker}` — is public market data (no signing, no
+ * API key) per Kalshi's docs. Used only to turn a raw ticker like
+ * `KXWCGAME-26JUN16FRASEN-FRA` into a human-readable description instead of
+ * showing the ticker itself. Cached per-ticker for the life of one sync call
+ * since the same market often shows up across settlements/positions/orders.
+ */
+async function getMarketInfo(ticker, marketCache) {
+  if (marketCache.has(ticker)) return marketCache.get(ticker)
+  let market = null
+  try {
+    const res = await fetch(`${HOST}${BASE}/markets/${ticker}`)
+    if (res.ok) {
+      const data = await res.json()
+      market = data.market || null
+    }
+  } catch {
+    market = null
+  }
+  marketCache.set(ticker, market)
+  return market
+}
+
+// Builds a human-readable description from a GetMarket response, falling
+// back to the raw ticker if the lookup failed (e.g. an expired/delisted market).
+function describeMarket(market, ticker, side) {
+  if (!market) return `${ticker} (${side})`
+  const title = market.title || ticker
+  const sub = side === 'YES' ? market.yes_sub_title : market.no_sub_title
+  return sub ? `${title} — ${sub}` : `${title} (${side})`
 }
 
 // Decimal odds -> American odds integer.
@@ -89,7 +121,7 @@ function americanFromDecimal(dec) {
  * Kalshi contracts settle at $1.00 (100¢); your average fill price in cents
  * is the implied probability, so decimal odds = 100 / avgPriceCents.
  */
-function settlementToBet(s) {
+async function settlementToBet(s, marketCache) {
   const yesCount = s.yes_count || 0
   const noCount = s.no_count || 0
   const contracts = yesCount + noCount
@@ -102,12 +134,13 @@ function settlementToBet(s) {
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
   const side = yesCount >= noCount ? 'YES' : 'NO'
+  const market = await getMarketInfo(s.ticker, marketCache)
 
   return {
     id: `kalshi-${s.ticker}-${s.settled_time}`,
     ticker: s.ticker,
     date: String(s.settled_time || '').slice(0, 10),
-    description: `${s.ticker} (${side})`,
+    description: describeMarket(market, s.ticker, side),
     sportsbook: 'Kalshi',
     wager: +(costCents / 100).toFixed(2),
     odds: (american > 0 ? '+' : '') + american,
@@ -126,7 +159,7 @@ function settlementToBet(s) {
  * `market_exposure_dollars` is the cost basis already in dollars (not
  * cents) as a numeric string.
  */
-function positionToBet(p) {
+async function positionToBet(p, marketCache) {
   const signedCount = parseFloat(p.position_fp || 0)
   const contracts = Math.abs(signedCount)
   const costDollars = Math.abs(parseFloat(p.market_exposure_dollars || 0))
@@ -136,12 +169,13 @@ function positionToBet(p) {
   const avgPriceCents = (costDollars * 100) / contracts // 1..99
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
+  const market = await getMarketInfo(p.ticker, marketCache)
 
   return {
     id: `kalshi-open-${p.ticker}`,
     ticker: p.ticker,
     date: String(p.last_updated_ts || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
-    description: `${p.ticker} (${side})`,
+    description: describeMarket(market, p.ticker, side),
     sportsbook: 'Kalshi',
     wager: +costDollars.toFixed(2),
     odds: (american > 0 ? '+' : '') + american,
@@ -161,7 +195,7 @@ function positionToBet(p) {
  * `status=resting` orders are fetched: canceled orders have no money at
  * risk, and filled orders already show up via /portfolio/positions.
  */
-function orderToBet(o) {
+async function orderToBet(o, marketCache) {
   const contracts = parseFloat(o.remaining_count_fp || 0)
   if (contracts <= 0) return null
   const side = o.side === 'no' ? 'NO' : 'YES'
@@ -172,12 +206,13 @@ function orderToBet(o) {
   const avgPriceCents = priceDollars * 100 // 1..99
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
+  const market = await getMarketInfo(o.ticker, marketCache)
 
   return {
     id: `kalshi-order-${o.order_id}`,
     ticker: o.ticker,
     date: String(o.created_time || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
-    description: `${o.ticker} (${side})`,
+    description: describeMarket(market, o.ticker, side),
     sportsbook: 'Kalshi',
     wager: +costDollars.toFixed(2),
     odds: (american > 0 ? '+' : '') + american,
@@ -204,21 +239,13 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   }
 
   const bets = []
-  // TEMP debug counters — remove once sync is confirmed working against a
-  // real account. Lets us see what Kalshi actually returned without needing
-  // server log access.
-  let settlementsSeen = 0
-  let positionsSeen = 0
-  let ordersSeen = 0
-  let sampleSettlement = null
-  let samplePosition = null
-  let sampleOrder = null
+  // Caches GetMarket lookups by ticker for the life of this sync call, since
+  // the same market often appears across settlements/positions/orders.
+  const marketCache = new Map()
   try {
-    await paginate('/portfolio/settlements', keyId, privateKey, (data) => {
+    await paginate('/portfolio/settlements', keyId, privateKey, async (data) => {
       for (const s of data.settlements || []) {
-        settlementsSeen++
-        if (!sampleSettlement) sampleSettlement = s
-        const bet = settlementToBet(s)
+        const bet = await settlementToBet(s, marketCache)
         if (bet) bets.push(bet)
       }
     })
@@ -226,21 +253,17 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     // "pending" immediately instead of waiting for the market to resolve.
     // count_filter=position restricts results to markets with a non-zero
     // position (otherwise Kalshi returns every market ever traded).
-    await paginate('/portfolio/positions', keyId, privateKey, (data) => {
+    await paginate('/portfolio/positions', keyId, privateKey, async (data) => {
       for (const p of data.market_positions || []) {
-        positionsSeen++
-        if (!samplePosition) samplePosition = p
-        const bet = positionToBet(p)
+        const bet = await positionToBet(p, marketCache)
         if (bet) bets.push(bet)
       }
     }, '&count_filter=position')
     // Resting (placed but not yet filled) orders — money at risk that
     // hasn't become a position yet, so it wouldn't show up above either.
-    await paginate('/portfolio/orders', keyId, privateKey, (data) => {
+    await paginate('/portfolio/orders', keyId, privateKey, async (data) => {
       for (const o of data.orders || []) {
-        ordersSeen++
-        if (!sampleOrder) sampleOrder = o
-        const bet = orderToBet(o)
+        const bet = await orderToBet(o, marketCache)
         if (bet) bets.push(bet)
       }
     }, '&status=resting')
@@ -252,6 +275,5 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     bets,
     count: bets.length,
     syncedAt: new Date().toISOString(),
-    debug: { settlementsSeen, positionsSeen, ordersSeen, sampleSettlement, samplePosition, sampleOrder },
   }
 })

@@ -105,6 +105,13 @@ configure**, because the key comes from the client at call time.
   Bets** calendar. Each sync drops any old pending placeholder for a ticker
   it touches at all (order filled → position, position settled, etc.) so
   the fresh picture replaces it instead of duplicating.
+- **Descriptions use the real market title, not the raw ticker.** Kalshi's
+  tickers (e.g. `KXWCGAME-26JUN16FRASEN-FRA`) aren't readable, so `syncKalshi`
+  also calls the public, unauthenticated `GET /markets/{ticker}` endpoint
+  (`getMarketInfo()`/`describeMarket()` in `functions/index.js`) and builds
+  the description from its `title` + `yes_sub_title`/`no_sub_title` fields,
+  caching each ticker's lookup for the life of one sync. If a market lookup
+  fails (e.g. delisted), it falls back to showing the raw ticker.
 - **Odds conversion:** Kalshi contracts pay $1.00 (100¢), so your average fill
   price in cents is the implied probability → decimal odds = `100 / avgPriceCents`.
 - **Sandbox vs production:** switch `HOST` in `functions/index.js` to

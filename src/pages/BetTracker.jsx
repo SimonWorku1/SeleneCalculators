@@ -184,12 +184,47 @@ export default function BetTracker() {
 
   /* ── random test data ── */
   function generateTestBets() {
-    const markets = ['Lakers ML', 'Chiefs -3.5', 'Over 47.5', 'Yankees ML', 'Celtics -6',
-      'Warriors +4.5', 'Trump 2028 Nominee', 'Fed cuts rates', 'BTC > $100k EOY',
-      'Real Madrid to win', 'Djokovic to win', 'Under 215.5', 'Eagles ML', 'Bills -7']
     const books = ['Kalshi', 'DraftKings', 'FanDuel', 'BetMGM', 'Polymarket', 'Caesars']
     const americanOdds = [-200, -150, -130, -110, +100, +120, +150, +180, +220, +300, -250]
     const rand = (arr) => arr[Math.floor(Math.random() * arr.length)]
+
+    // Matchups for moneyline/spread/total descriptions, so each one names an
+    // opponent instead of floating alone (e.g. "Lakers ML" -> "Lakers ML (vs Celtics)").
+    const matchups = [
+      ['Lakers', 'Celtics'], ['Chiefs', 'Bills'], ['Yankees', 'Red Sox'],
+      ['Warriors', 'Suns'], ['Real Madrid', 'Barcelona'], ['Eagles', 'Cowboys'],
+      ['Dodgers', 'Padres'], ['Heat', 'Knicks'], ['Djokovic', 'Alcaraz'],
+    ]
+    const spreadLines = [-7, -6, -3.5, -2.5, +2.5, +3.5, +4.5, +6]
+    const totalLines = ['Over 47.5', 'Over 215.5', 'Under 8.5', 'Under 220.5']
+    // Player props always carry the player's name, not just the stat line.
+    const playerProps = [
+      ['LeBron James', 'Over 27.5 Points'], ['Patrick Mahomes', 'Over 2.5 TD Passes'],
+      ['Aaron Judge', 'Over 0.5 Home Runs'], ['Steph Curry', 'Over 4.5 Threes Made'],
+      ['Jayson Tatum', 'Over 9.5 Rebounds'], ['Shohei Ohtani', 'Over 1.5 Total Bases'],
+      ['Travis Kelce', 'Over 5.5 Receptions'], ['Nikola Jokic', 'Over 10.5 Assists'],
+    ]
+    const otherMarkets = ['Trump 2028 Nominee', 'Fed cuts rates in July', 'BTC > $100k EOY']
+
+    function randomDescription() {
+      const type = rand(['ml', 'spread', 'total', 'prop', 'other'])
+      if (type === 'ml' || type === 'spread') {
+        const pair = rand(matchups)
+        const [team, opp] = Math.random() < 0.5 ? pair : [pair[1], pair[0]]
+        if (type === 'ml') return `${team} ML (vs ${opp})`
+        const line = rand(spreadLines)
+        return `${team} ${line > 0 ? '+' : ''}${line} (vs ${opp})`
+      }
+      if (type === 'total') {
+        const [a, b] = rand(matchups)
+        return `${rand(totalLines)} (${a} vs ${b})`
+      }
+      if (type === 'prop') {
+        const [player, prop] = rand(playerProps)
+        return `${player} ${prop}`
+      }
+      return rand(otherMarkets)
+    }
 
     // Target EV as ROI per bet (% of stake). For decimal odds `dec`, the win
     // probability that yields a given EV is p = (EV + 1) / dec, since
@@ -214,7 +249,7 @@ export default function BetTracker() {
         made.push({
           id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random() + seq++),
           date: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-          description: rand(markets),
+          description: randomDescription(),
           sportsbook: rand(books),
           wager,
           odds: (odds > 0 ? '+' : '') + odds,
