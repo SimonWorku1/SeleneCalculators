@@ -1053,3 +1053,64 @@ input[type=number] { -moz-appearance: textfield; }
   padding: 1px 5px;
   font-size: 12px;
 }
+
+/* ── Bet Tracker: clickable calendar days + day-detail bubbles ── */
+.bt-cell.clickable {
+  cursor: pointer;
+  transition: border-color 0.12s, transform 0.06s;
+}
+
+.bt-cell.clickable:hover {
+  border-color: var(--accent);
+}
+
+.bt-cell.clickable:active { transform: scale(0.98); }
+
+.bt-bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bt-bubble {
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--surface2);
+  padding: 12px 14px;
+}
+
+.bt-bubble.win  { border-left-color: var(--accent-green); background: rgba(63,185,80,0.08); }
+.bt-bubble.loss { border-left-color: var(--accent-red);   background: rgba(248,81,73,0.08); }
+.bt-bubble.push { border-left-color: var(--accent-yellow); }
+.bt-bubble.pending { border-left-color: var(--accent); background: rgba(88,166,255,0.06); }
+
+.bt-bubble-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.bt-bubble-desc {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.bt-bubble-pnl {
+  font-weight: 700;
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.bt-bubble-pnl.green { color: var(--accent-green); }
+.bt-bubble-pnl.red { color: var(--accent-red); }
+
+.bt-bubble-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}

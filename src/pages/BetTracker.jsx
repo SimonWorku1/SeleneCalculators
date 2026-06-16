@@ -130,6 +130,7 @@ export default function BetTracker() {
   const [syncMsg, setSyncMsg] = useState('')
   const [testEv, setTestEv] = useState('5')
   const [showManual, setShowManual] = useState(false)
+  const [dayModal, setDayModal] = useState(null) // day number (in current view month) or null
   const [syncing, setSyncing] = useState(false)
   const [sourceTab, setSourceTab] = useState('all') // all | manual | kalshi
   const [kKeyId, setKKeyId] = useState(() => { try { return localStorage.getItem(KALSHI_KEYID) || '' } catch { return '' } })
@@ -401,6 +402,14 @@ export default function BetTracker() {
 
   const hasChartData = viewBets.some(b => b.result !== 'pending')
 
+  // bets on the day currently open in the day-detail modal, newest first
+  const modalBets = useMemo(() => {
+    if (dayModal == null) return []
+    return viewBets
+      .filter(b => Number(b.date.split('-')[2]) === dayModal)
+      .sort((a, b) => betProfit(b) - betProfit(a))
+  }, [viewBets, dayModal])
+
   function changeMonth(delta) {
     setView(v => {
       const d = new Date(v.year, v.month + delta, 1)
@@ -548,7 +557,11 @@ export default function BetTracker() {
             const count = dayCount[day]
             const has = count > 0
             return (
-              <div key={day} className={`bt-cell${iso === todayStr ? ' today' : ''}${has ? (pnl > 0 ? ' pos' : pnl < 0 ? ' neg' : '') : ''}`}>
+              <div
+                key={day}
+                className={`bt-cell${iso === todayStr ? ' today' : ''}${has ? (pnl > 0 ? ' pos' : pnl < 0 ? ' neg' : '') : ''}${has ? ' clickable' : ''}`}
+                onClick={has ? () => setDayModal(day) : undefined}
+              >
                 <div className="bt-day-num">{day}</div>
                 {has && (
                   <>
@@ -573,7 +586,11 @@ export default function BetTracker() {
             const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
             const p = dayPending[day]
             return (
-              <div key={day} className={`bt-cell${iso === todayStr ? ' today' : ''}${p ? ' pending' : ''}`}>
+              <div
+                key={day}
+                className={`bt-cell${iso === todayStr ? ' today' : ''}${p ? ' pending clickable' : ''}`}
+                onClick={p ? () => setDayModal(day) : undefined}
+              >
                 <div className="bt-day-num">{day}</div>
                 {p && (
                   <>
@@ -772,6 +789,47 @@ export default function BetTracker() {
           <div><strong style={{ color: 'var(--text)' }}>Quick edits</strong><br />Click any result badge in the table to cycle Pending → Won → Lost → Push.</div>
         </div>
       </div>
+
+      {/* ── Day detail modal ── */}
+      {dayModal != null && (
+        <div className="bt-modal-overlay" onClick={() => setDayModal(null)}>
+          <div className="bt-modal card" onClick={e => e.stopPropagation()}>
+            <div className="bt-month-nav">
+              <h2 style={{ margin: 0 }}>{MONTHS[month]} {dayModal}, {year}</h2>
+              <button className="bt-del" style={{ fontSize: 18 }} onClick={() => setDayModal(null)} title="Close">✕</button>
+            </div>
+            {modalBets.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No bets on this day.</p>
+            ) : (
+              <div className="bt-bubbles">
+                {modalBets.map(b => {
+                  const p = betProfit(b)
+                  const pending = b.result === 'pending'
+                  const tone = pending ? 'pending' : b.result === 'won' ? 'win' : b.result === 'lost' ? 'loss' : 'push'
+                  return (
+                    <div key={b.id} className={`bt-bubble ${tone}`}>
+                      <div className="bt-bubble-top">
+                        <span className="bt-bubble-desc">{b.description}</span>
+                        {!pending && (
+                          <span className={`bt-bubble-pnl ${p > 0 ? 'green' : p < 0 ? 'red' : ''}`}>
+                            {b.result === 'push' ? 'Push' : money(p)}
+                          </span>
+                        )}
+                        {pending && <span className="badge badge-blue">Pending</span>}
+                      </div>
+                      <div className="bt-bubble-meta">
+                        <span>💵 ${b.wager.toFixed(2)}</span>
+                        <span>📊 {b.odds}</span>
+                        <span>🏷 {b.source === 'kalshi' ? 'Kalshi' : (b.sportsbook || 'Manual')}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Manual entry modal ── */}
       {showManual && (
