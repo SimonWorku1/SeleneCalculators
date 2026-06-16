@@ -13,6 +13,11 @@ The function does **not** store it.
 > The tracker UI (key input, tutorial, tabs, Sync button) already works. To make
 > Sync actually fetch data, deploy the Cloud Function once with the steps below.
 
+> ⚠️ **Currently deployed with public (unauthenticated) invocation enabled** —
+> see "Public access" under Notes & caveats below. **Do this before any real
+> launch:** lock it down with Firebase App Check (and/or rate limiting) before
+> switching the Cloud Run service back to "Require authentication."
+
 ---
 
 ## A. Get your Kalshi API key (end-user step)
@@ -69,6 +74,18 @@ configure**, because the key comes from the client at call time.
 - **No server-side secrets.** Because the key is supplied per-call, you do not
   run `firebase functions:secrets:set`. The trade-off is the key transits the
   function (in memory, not stored) when you sync.
+- **⚠️ Public access (TODO before final launch).** `syncKalshi`'s Cloud Run
+  service has **"Allow public access"** turned on (Cloud Run console → service
+  → **Security** tab → Authentication). This was the only way to let the
+  static site (no sign-in, no Firebase Auth) call it at all — by default Cloud
+  Run gen2 functions require IAM auth and reject the browser's request with a
+  CORS/403 error before your code even runs. Public access does **not** leak
+  any secret (nothing is stored server-side; callers must supply their own
+  Kalshi key), but it does mean *anyone* on the internet — not just this
+  site's visitors — can invoke the function and consume your Cloud
+  Functions/Cloud Run quota. Before a real/public launch: add **Firebase App
+  Check** (verifies calls come from your actual deployed app) and/or rate
+  limiting, then flip the service back to "Require authentication."
 - **Field mapping is best-effort.** `settlementToBet()` in `functions/index.js`
   maps Kalshi's `/portfolio/settlements` fields (`yes_count`, `no_count`,
   `yes_total_cost`, `no_total_cost`, `revenue`, `settled_time`, `ticker`) to the

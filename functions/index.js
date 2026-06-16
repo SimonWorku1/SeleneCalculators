@@ -11,6 +11,13 @@
  * IMPORTANT: Kalshi field names can change between API versions. The
  * normalization in `settlementToBet` is best-effort — verify against the
  * current /portfolio/settlements response and adjust as needed.
+ *
+ * ⚠️ TODO before a real/public launch: this function's Cloud Run service is
+ * currently deployed with "Allow public access" (unauthenticated invocation)
+ * because the static site has no sign-in to attach an IAM identity to. That
+ * doesn't leak any secret (nothing is stored server-side), but it lets
+ * anyone invoke it, not just this site. Add Firebase App Check before
+ * switching the service back to "Require authentication." See KALSHI_SETUP.md.
  */
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
