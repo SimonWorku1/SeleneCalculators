@@ -120,17 +120,29 @@ function americanFromDecimal(dec) {
  * Map one Kalshi settlement to the tracker's bet shape.
  * Kalshi contracts settle at $1.00 (100¢); your average fill price in cents
  * is the implied probability, so decimal odds = 100 / avgPriceCents.
+ *
+ * Kalshi migrated portfolio responses to fixed-point / dollar fields
+ * (`yes_count_fp`, `yes_total_cost_dollars`, `revenue_dollars`) and the legacy
+ * cent-integer fields (`yes_count`, `yes_total_cost`, `revenue`) get truncated
+ * or dropped on fractional-enabled markets — which made every settled bet map
+ * to null here. We read the new fields first and fall back to the old ones.
  */
 async function settlementToBet(s, marketCache) {
-  const yesCount = s.yes_count || 0
-  const noCount = s.no_count || 0
+  const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
+  const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
   const contracts = yesCount + noCount
-  const costCents = (s.yes_total_cost || 0) + (s.no_total_cost || 0)
-  if (contracts <= 0 || costCents <= 0) return null
 
-  const revenueCents = s.revenue || 0
-  const pnlCents = revenueCents - costCents
-  const avgPriceCents = costCents / contracts // 1..99
+  // Cost basis in dollars: prefer the *_dollars fields, else convert legacy cents.
+  const costDollars =
+    s.yes_total_cost_dollars != null || s.no_total_cost_dollars != null
+      ? parseFloat(s.yes_total_cost_dollars || 0) + parseFloat(s.no_total_cost_dollars || 0)
+      : ((s.yes_total_cost || 0) + (s.no_total_cost || 0)) / 100
+  if (contracts <= 0 || costDollars <= 0) return null
+
+  // Payout in dollars: prefer revenue_dollars, else convert legacy cents.
+  const revenueDollars = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : (s.revenue || 0) / 100
+  const pnlDollars = revenueDollars - costDollars
+  const avgPriceCents = (costDollars * 100) / contracts // 1..99
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
   const side = yesCount >= noCount ? 'YES' : 'NO'
@@ -142,11 +154,11 @@ async function settlementToBet(s, marketCache) {
     date: String(s.settled_time || '').slice(0, 10),
     description: describeMarket(market, s.ticker, side),
     sportsbook: 'Kalshi',
-    wager: +(costCents / 100).toFixed(2),
+    wager: +costDollars.toFixed(2),
     odds: (american > 0 ? '+' : '') + american,
     fmt: 'american',
     dec,
-    result: pnlCents > 0 ? 'won' : pnlCents < 0 ? 'lost' : 'push',
+    result: pnlDollars > 0 ? 'won' : pnlDollars < 0 ? 'lost' : 'push',
     source: 'kalshi',
   }
 }

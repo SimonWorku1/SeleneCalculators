@@ -90,10 +90,15 @@ configure**, because the key comes from the client at call time.
   Check** (verifies calls come from your actual deployed app) and/or rate
   limiting, then flip the service back to "Require authentication."
 - **Field mapping is best-effort.** `settlementToBet()` in `functions/index.js`
-  maps Kalshi's `/portfolio/settlements` fields (`yes_count`, `no_count`,
-  `yes_total_cost`, `no_total_cost`, `revenue`, `settled_time`, `ticker`) to the
-  tracker's `{ date, description, wager, odds, result }` shape. After your first
-  real sync, eyeball the results and adjust if Kalshi has renamed fields.
+  maps Kalshi's `/portfolio/settlements` fields to the tracker's
+  `{ date, description, wager, odds, result }` shape. Kalshi migrated these to
+  fixed-point / dollar fields (`yes_count_fp`, `no_count_fp`,
+  `yes_total_cost_dollars`, `no_total_cost_dollars`, `revenue_dollars`) — the
+  legacy cent-integer fields (`yes_count`, `yes_total_cost`, `revenue`) get
+  truncated or dropped on fractional-enabled markets, which is why settled bets
+  used to sync as nothing. The mapper now reads the new fields first and falls
+  back to the old ones. After your first real sync, eyeball the results and
+  adjust if Kalshi has renamed fields again.
 - **Open and unfilled bets sync as "pending."** `positionToBet()` maps
   `/portfolio/positions` (`position_fp`, `market_exposure_dollars`, `ticker`,
   `last_updated_ts`) for bets that have filled but not settled.
