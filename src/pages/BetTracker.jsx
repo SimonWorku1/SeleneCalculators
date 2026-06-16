@@ -426,18 +426,6 @@ export default function BetTracker() {
     return map
   }, [viewBets])
 
-  // per-day pending (unsettled) bet count + amount risked
-  const dayPending = useMemo(() => {
-    const map = {}
-    for (const b of viewBets) {
-      if (b.result !== 'pending') continue
-      const day = Number(b.date.split('-')[2])
-      if (!map[day]) map[day] = { count: 0, wager: 0 }
-      map[day].count += 1
-      map[day].wager += b.wager
-    }
-    return map
-  }, [viewBets])
 
   // chart series
   const chartDays = useMemo(() => {
@@ -610,7 +598,7 @@ export default function BetTracker() {
         <button className={`ev-tab${sourceTab === 'kalshi' ? ' active' : ''}`} onClick={() => setSourceTab('kalshi')}>Kalshi ({counts.kalshi})</button>
       </div>
 
-      {/* ── Calendar (top) ── */}
+      {/* ── Calendar ── */}
       <div className="card">
         <div className="bt-month-nav">
           <button className="btn btn-outline btn-sm" onClick={() => changeMonth(-1)}>← Prev</button>
@@ -645,37 +633,6 @@ export default function BetTracker() {
         </div>
       </div>
 
-      {/* ── Pending bets calendar ── */}
-      <div className="card">
-        <h2>Pending Bets — {MONTHS[month]} {year}</h2>
-        <div className="bt-calendar">
-          {WEEKDAYS.map(w => <div key={w} className="bt-weekday">{w}</div>)}
-          {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pe${i}`} className="bt-cell empty" />)}
-          {Array.from({ length: daysInMonth }).map((_, i) => {
-            const day = i + 1
-            const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-            const p = dayPending[day]
-            return (
-              <div
-                key={day}
-                className={`bt-cell${iso === todayStr ? ' today' : ''}${p ? ' pending clickable' : ''}`}
-                onClick={p ? () => setDayModal(day) : undefined}
-              >
-                <div className="bt-day-num">{day}</div>
-                {p && (
-                  <>
-                    <div className="bt-day-pnl blue">{p.count} open</div>
-                    <div className="bt-day-count">${p.wager.toFixed(0)} risked</div>
-                  </>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        {stats.pending === 0 && (
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 12 }}>No pending bets this month.</p>
-        )}
-      </div>
 
       {/* ── Summary ── */}
       <div className="card">

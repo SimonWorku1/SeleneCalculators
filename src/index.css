@@ -918,7 +918,6 @@ input[type=number] { -moz-appearance: textfield; }
 
 .bt-cell.pos { background: rgba(63,185,80,0.10); border-color: rgba(63,185,80,0.30); }
 .bt-cell.neg { background: rgba(248,81,73,0.10); border-color: rgba(248,81,73,0.30); }
-.bt-cell.pending { background: rgba(88,166,255,0.10); border-color: rgba(88,166,255,0.30); }
 
 .bt-day-num {
   font-size: 12px;
@@ -934,7 +933,6 @@ input[type=number] { -moz-appearance: textfield; }
 
 .bt-day-pnl.green { color: var(--accent-green); }
 .bt-day-pnl.red { color: var(--accent-red); }
-.bt-day-pnl.blue { color: var(--accent); }
 
 .bt-day-count {
   font-size: 10px;
