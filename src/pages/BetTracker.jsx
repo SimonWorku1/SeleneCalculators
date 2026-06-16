@@ -598,138 +598,161 @@ export default function BetTracker() {
         <button className={`ev-tab${sourceTab === 'kalshi' ? ' active' : ''}`} onClick={() => setSourceTab('kalshi')}>Kalshi ({counts.kalshi})</button>
       </div>
 
-      {/* ── Calendar ── */}
-      <div className="card">
-        <div className="bt-month-nav">
-          <button className="btn btn-outline btn-sm" onClick={() => changeMonth(-1)}>← Prev</button>
-          <h2 style={{ margin: 0 }}>{MONTHS[month]} {year}</h2>
-          <button className="btn btn-outline btn-sm" onClick={() => changeMonth(1)}>Next →</button>
-        </div>
-        <div className="bt-calendar">
-          {WEEKDAYS.map(w => <div key={w} className="bt-weekday">{w}</div>)}
-          {Array.from({ length: firstWeekday }).map((_, i) => <div key={`e${i}`} className="bt-cell empty" />)}
-          {Array.from({ length: daysInMonth }).map((_, i) => {
-            const day = i + 1
-            const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-            const pnl = dayPnl[day]
-            const count = dayCount[day]
-            const has = count > 0
-            return (
-              <div
-                key={day}
-                className={`bt-cell${iso === todayStr ? ' today' : ''}${has ? (pnl > 0 ? ' pos' : pnl < 0 ? ' neg' : '') : ''}${has ? ' clickable' : ''}`}
-                onClick={has ? () => setDayModal(day) : undefined}
-              >
-                <div className="bt-day-num">{day}</div>
-                {has && (
-                  <>
-                    <div className={`bt-day-pnl ${pnl > 0 ? 'green' : pnl < 0 ? 'red' : ''}`}>{pnl === 0 ? '$0' : money(pnl)}</div>
-                    <div className="bt-day-count">{count} bet{count === 1 ? '' : 's'}</div>
-                  </>
-                )}
+      <div className="calc-layout">
+        {/* ── Left column: controls ── */}
+        <div className="calc-col">
+          {/* ── Add bets ── */}
+          <div className="card">
+            <h2>Add Bets</h2>
+            <div className="bt-add-actions">
+              <button className="btn btn-sm bt-action-btn" onClick={() => { setError(''); setForm(f => ({ ...f, date: todayISO() })); setShowManual(true) }}>+ Add Manual Bet</button>
+              <button className="btn btn-outline btn-sm bt-action-btn" onClick={() => setShowGen(true)}>🎲 Add Random Bets</button>
+              <button className="btn btn-outline btn-sm bt-action-btn" onClick={clearMonth} disabled={monthBets.length === 0}>🗑 Clear Month</button>
+            </div>
+            {genMsg && <div className="info-box" style={{ marginTop: 14 }}>{genMsg}</div>}
+          </div>
+
+          {/* ── Connect Kalshi ── */}
+          <div className="card">
+            <h2>Connect Kalshi</h2>
+
+            <button className="btn btn-outline btn-sm" style={{ width: 'auto', marginTop: 0 }} onClick={() => setShowTutorial(t => !t)}>
+              {showTutorial ? 'Hide' : 'How do I get my Kalshi API key?'}
+            </button>
+
+            {showTutorial && (
+              <div className="info-box" style={{ marginTop: 14 }}>
+                <strong>Getting your Kalshi API key (one-time, on a computer):</strong>
+                <ol className="bt-steps">
+                  <li>Log in to Kalshi in your browser and open <strong>Profile Settings</strong> (<code>kalshi.com/account/profile</code>).</li>
+                  <li>Scroll to the <strong>API Keys</strong> section and click <strong>Create New API Key</strong>.</li>
+                  <li>Kalshi shows you a <strong>Key ID</strong> and a one-time <strong>Private Key</strong> (and downloads a <code>.txt</code> file). <strong>Copy the private key now</strong> — Kalshi will not show it again.</li>
+                  <li>Paste the <strong>Key ID</strong> and the <strong>full private key</strong> (including the <code>-----BEGIN…</code> and <code>-----END…</code> lines) into the boxes below, then click <strong>Save key</strong>.</li>
+                </ol>
+                Lost the private key? Just create a new one — the old one keeps working until you delete it.
               </div>
-            )
-          })}
-        </div>
-      </div>
+            )}
 
+            {kalshiConnected ? (
+              <div style={{ marginTop: 16 }}>
+                <div className="info-box" style={{ borderColor: 'rgba(63,185,80,0.4)', background: 'rgba(63,185,80,0.08)', color: 'var(--accent-green)' }}>
+                  ✓ Kalshi key saved on this device (Key ID ending <strong>…{kKeyId.slice(-6)}</strong>). Your private key never leaves your browser except to sign a sync request.
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+                  <button className="btn btn-sm bt-action-btn" onClick={syncKalshi} disabled={syncing}>{syncing ? 'Syncing…' : '🔄 Sync Kalshi bets'}</button>
+                  <button className="btn btn-outline btn-sm" onClick={() => { setShowSecret(false); setEditKalshi(true) }}>Replace key</button>
+                  <button className="btn btn-outline btn-sm" onClick={removeKalshiKey}>Remove key</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginTop: 16 }}>
+                <div className="field" style={{ marginBottom: 14 }}>
+                  <label>Kalshi Key ID</label>
+                  <input
+                    type={showSecret ? 'text' : 'password'}
+                    placeholder="e.g. 1a2b3c4d-…"
+                    value={kKeyId}
+                    onChange={e => setKKeyId(e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="field">
+                  <label>Kalshi Private Key (PEM)</label>
+                  <textarea
+                    className="bt-secret"
+                    rows={4}
+                    placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;…&#10;-----END RSA PRIVATE KEY-----"
+                    value={kPriv}
+                    onChange={e => setKPriv(e.target.value)}
+                    style={!showSecret ? { WebkitTextSecurity: 'disc' } : undefined}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <label className="bt-show-toggle">
+                  <input type="checkbox" checked={showSecret} onChange={e => setShowSecret(e.target.checked)} /> Show key while typing
+                </label>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                  <button className="btn btn-sm bt-action-btn" onClick={saveKalshiKey}>Save key</button>
+                  {kKeyId && kPriv && localStorage.getItem(KALSHI_KEYID) && (
+                    <button className="btn btn-outline btn-sm" onClick={() => { setEditKalshi(false); setShowSecret(false) }}>Cancel</button>
+                  )}
+                </div>
+              </div>
+            )}
 
-      {/* ── Summary ── */}
-      <div className="card">
-        <h2>{MONTHS[month]} {year} — Summary</h2>
-        <div className="result-grid">
-          <div className="result-item"><div className="label">Net P&amp;L</div><div className={`value ${stats.profit >= 0 ? 'green' : 'red'}`}>{money(stats.profit)}</div></div>
-          <div className="result-item"><div className="label">Total Wagered</div><div className="value">${stats.wagered.toFixed(2)}</div></div>
-          <div className="result-item"><div className="label">ROI</div><div className={`value ${(stats.roi ?? 0) >= 0 ? 'green' : 'red'}`}>{stats.roi === null ? '—' : `${stats.roi >= 0 ? '+' : ''}${stats.roi.toFixed(1)}%`}</div></div>
-          <div className="result-item"><div className="label">Win Rate</div><div className="value blue">{stats.winRate === null ? '—' : `${stats.winRate.toFixed(0)}%`}</div></div>
-          <div className="result-item"><div className="label">Record (W-L)</div><div className="value yellow">{stats.won}–{stats.lost}{stats.pending ? ` · ${stats.pending} open` : ''}</div></div>
-        </div>
-      </div>
+            {syncMsg && <div className="info-box" style={{ marginTop: 14 }}>{syncMsg}</div>}
 
-      {/* ── Add bets ── */}
-      <div className="card">
-        <h2>Add Bets</h2>
-        <div className="bt-add-actions">
-          <button className="btn btn-sm bt-action-btn" onClick={() => { setError(''); setForm(f => ({ ...f, date: todayISO() })); setShowManual(true) }}>+ Add Manual Bet</button>
-          <button className="btn btn-outline btn-sm bt-action-btn" onClick={() => setShowGen(true)}>🎲 Add Random Bets</button>
-          <button className="btn btn-outline btn-sm bt-action-btn" onClick={clearMonth} disabled={monthBets.length === 0}>🗑 Clear Month</button>
-        </div>
-        {genMsg && <div className="info-box" style={{ marginTop: 14 }}>{genMsg}</div>}
-      </div>
-
-      {/* ── Connect Kalshi ── */}
-      <div className="card">
-        <h2>Connect Kalshi</h2>
-
-        <button className="btn btn-outline btn-sm" style={{ width: 'auto', marginTop: 0 }} onClick={() => setShowTutorial(t => !t)}>
-          {showTutorial ? 'Hide' : 'How do I get my Kalshi API key?'}
-        </button>
-
-        {showTutorial && (
-          <div className="info-box" style={{ marginTop: 14 }}>
-            <strong>Getting your Kalshi API key (one-time, on a computer):</strong>
-            <ol className="bt-steps">
-              <li>Log in to Kalshi in your browser and open <strong>Profile Settings</strong> (<code>kalshi.com/account/profile</code>).</li>
-              <li>Scroll to the <strong>API Keys</strong> section and click <strong>Create New API Key</strong>.</li>
-              <li>Kalshi shows you a <strong>Key ID</strong> and a one-time <strong>Private Key</strong> (and downloads a <code>.txt</code> file). <strong>Copy the private key now</strong> — Kalshi will not show it again.</li>
-              <li>Paste the <strong>Key ID</strong> and the <strong>full private key</strong> (including the <code>-----BEGIN…</code> and <code>-----END…</code> lines) into the boxes below, then click <strong>Save key</strong>.</li>
-            </ol>
-            Lost the private key? Just create a new one — the old one keeps working until you delete it.
-          </div>
-        )}
-
-        {kalshiConnected ? (
-          <div style={{ marginTop: 16 }}>
-            <div className="info-box" style={{ borderColor: 'rgba(63,185,80,0.4)', background: 'rgba(63,185,80,0.08)', color: 'var(--accent-green)' }}>
-              ✓ Kalshi key saved on this device (Key ID ending <strong>…{kKeyId.slice(-6)}</strong>). Your private key never leaves your browser except to sign a sync request.
-            </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
-              <button className="btn btn-sm bt-action-btn" onClick={syncKalshi} disabled={syncing}>{syncing ? 'Syncing…' : '🔄 Sync Kalshi bets'}</button>
-              <button className="btn btn-outline btn-sm" onClick={() => { setShowSecret(false); setEditKalshi(true) }}>Replace key</button>
-              <button className="btn btn-outline btn-sm" onClick={removeKalshiKey}>Remove key</button>
+            <div className="info-box" style={{ marginTop: 14 }}>
+              Your key is stored only in this browser (localStorage). Syncing sends it once to your Firebase Cloud Function (which signs the request and is never stored there) — deploy <code>functions/syncKalshi</code> first; see <strong>KALSHI_SETUP.md</strong>. No backend yet? Use <strong>Import CSV</strong> below instead.
             </div>
           </div>
-        ) : (
-          <div style={{ marginTop: 16 }}>
-            <div className="field" style={{ marginBottom: 14 }}>
-              <label>Kalshi Key ID</label>
-              <input
-                type={showSecret ? 'text' : 'password'}
-                placeholder="e.g. 1a2b3c4d-…"
-                value={kKeyId}
-                onChange={e => setKKeyId(e.target.value)}
-                autoComplete="off"
-              />
+
+          {/* ── Import / Export ── */}
+          <div className="card">
+            <h2>Import &amp; Export</h2>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
+              <button className="btn btn-outline btn-sm" onClick={exportCsv} disabled={bets.length === 0}>Export CSV</button>
+              <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
+              <button className="btn btn-outline btn-sm" onClick={clearAll} disabled={bets.length === 0}>Clear All Bets</button>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importCsv} style={{ display: 'none' }} />
             </div>
-            <div className="field">
-              <label>Kalshi Private Key (PEM)</label>
-              <textarea
-                className="bt-secret"
-                rows={4}
-                placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;…&#10;-----END RSA PRIVATE KEY-----"
-                value={kPriv}
-                onChange={e => setKPriv(e.target.value)}
-                style={!showSecret ? { WebkitTextSecurity: 'disc' } : undefined}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <label className="bt-show-toggle">
-              <input type="checkbox" checked={showSecret} onChange={e => setShowSecret(e.target.checked)} /> Show key while typing
-            </label>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
-              <button className="btn btn-sm bt-action-btn" onClick={saveKalshiKey}>Save key</button>
-              {kKeyId && kPriv && localStorage.getItem(KALSHI_KEYID) && (
-                <button className="btn btn-outline btn-sm" onClick={() => { setEditKalshi(false); setShowSecret(false) }}>Cancel</button>
-              )}
+            {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
+            <div className="info-box" style={{ marginTop: 14 }}>
+              <strong>Import CSV</strong> works for any sportsbook export (or Kalshi, if you'd rather not connect a key): the importer matches columns by name — <strong>date</strong>, <strong>wager</strong> (or stake/amount/cost), and <strong>odds</strong> (or price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong>. Clear Month / Clear All Bets remove what's stored locally.
             </div>
           </div>
-        )}
+        </div>
 
-        {syncMsg && <div className="info-box" style={{ marginTop: 14 }}>{syncMsg}</div>}
+        {/* ── Right column: calendar + summary ── */}
+        <div className="calc-col">
+          {/* ── Calendar ── */}
+          <div className="card">
+            <div className="bt-month-nav">
+              <button className="btn btn-outline btn-sm" onClick={() => changeMonth(-1)}>← Prev</button>
+              <h2 style={{ margin: 0 }}>{MONTHS[month]} {year}</h2>
+              <button className="btn btn-outline btn-sm" onClick={() => changeMonth(1)}>Next →</button>
+            </div>
+            <div className="bt-calendar bt-compact">
+              {WEEKDAYS.map(w => <div key={w} className="bt-weekday">{w}</div>)}
+              {Array.from({ length: firstWeekday }).map((_, i) => <div key={`e${i}`} className="bt-cell empty" />)}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const day = i + 1
+                const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                const pnl = dayPnl[day]
+                const count = dayCount[day]
+                const has = count > 0
+                return (
+                  <div
+                    key={day}
+                    className={`bt-cell${iso === todayStr ? ' today' : ''}${has ? (pnl > 0 ? ' pos' : pnl < 0 ? ' neg' : '') : ''}${has ? ' clickable' : ''}`}
+                    onClick={has ? () => setDayModal(day) : undefined}
+                  >
+                    <div className="bt-day-num">{day}</div>
+                    {has && (
+                      <>
+                        <div className={`bt-day-pnl ${pnl > 0 ? 'green' : pnl < 0 ? 'red' : ''}`}>{pnl === 0 ? '$0' : money(pnl)}</div>
+                        <div className="bt-day-count">{count} bet{count === 1 ? '' : 's'}</div>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
 
-        <div className="info-box" style={{ marginTop: 14 }}>
-          Your key is stored only in this browser (localStorage). Syncing sends it once to your Firebase Cloud Function (which signs the request and is never stored there) — deploy <code>functions/syncKalshi</code> first; see <strong>KALSHI_SETUP.md</strong>. No backend yet? Use <strong>Import CSV</strong> below instead.
+          {/* ── Summary ── */}
+          <div className="card">
+            <h2>{MONTHS[month]} {year} — Summary</h2>
+            <div className="result-grid">
+              <div className="result-item"><div className="label">Net P&amp;L</div><div className={`value ${stats.profit >= 0 ? 'green' : 'red'}`}>{money(stats.profit)}</div></div>
+              <div className="result-item"><div className="label">Total Wagered</div><div className="value">${stats.wagered.toFixed(2)}</div></div>
+              <div className="result-item"><div className="label">ROI</div><div className={`value ${(stats.roi ?? 0) >= 0 ? 'green' : 'red'}`}>{stats.roi === null ? '—' : `${stats.roi >= 0 ? '+' : ''}${stats.roi.toFixed(1)}%`}</div></div>
+              <div className="result-item"><div className="label">Win Rate</div><div className="value blue">{stats.winRate === null ? '—' : `${stats.winRate.toFixed(0)}%`}</div></div>
+              <div className="result-item"><div className="label">Record (W-L)</div><div className="value yellow">{stats.won}–{stats.lost}{stats.pending ? ` · ${stats.pending} open` : ''}</div></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -747,7 +770,7 @@ export default function BetTracker() {
           : <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No settled bets this month yet. Add bets and mark them won or lost to see your P&amp;L curve.</p>}
       </div>
 
-      {/* ── Bet list ── */}
+      {/* ── Bet list (full width, chronological) ── */}
       <div className="card">
         <h2>Bets — {MONTHS[month]} {year}{sourceTab !== 'all' ? ` · ${sourceTab === 'kalshi' ? 'Kalshi' : 'Manual'}` : ''}</h2>
         {viewBets.length === 0 ? (
@@ -786,31 +809,6 @@ export default function BetTracker() {
             </tbody>
           </table>
         )}
-      </div>
-
-      {/* ── Import / Export ── */}
-      <div className="card">
-        <h2>Import &amp; Export</h2>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
-          <button className="btn btn-outline btn-sm" onClick={exportCsv} disabled={bets.length === 0}>Export CSV</button>
-          <button className="btn btn-outline btn-sm" onClick={clearMonth} disabled={monthBets.length === 0}>Clear Month</button>
-          <button className="btn btn-outline btn-sm" onClick={clearAll} disabled={bets.length === 0}>Clear All Bets</button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importCsv} style={{ display: 'none' }} />
-        </div>
-        {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
-        <div className="info-box" style={{ marginTop: 14 }}>
-          <strong>Import CSV</strong> works for any sportsbook export (or Kalshi, if you'd rather not connect a key): the importer matches columns by name — <strong>date</strong>, <strong>wager</strong> (or stake/amount/cost), and <strong>odds</strong> (or price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong>. Clear Month / Clear All Bets remove what's stored locally.
-        </div>
-      </div>
-
-      <div className="card">
-        <h2>About This Tracker</h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14, color: 'var(--text-muted)' }}>
-          <div><strong style={{ color: 'var(--text)' }}>Your data stays local</strong><br />Bets are saved in your browser (localStorage) on this device only — nothing is uploaded to a server. Use Export CSV to back up or move your data.</div>
-          <div><strong style={{ color: 'var(--text)' }}>P&amp;L math</strong><br />Won bets profit = wager × (decimal odds − 1); lost bets lose the wager; pushes and pending bets count as $0. ROI is net profit ÷ total wagered on settled bets.</div>
-          <div><strong style={{ color: 'var(--text)' }}>Quick edits</strong><br />Click any result badge in the table to cycle Pending → Won → Lost → Push.</div>
-        </div>
       </div>
 
       {/* ── Day detail modal ── */}

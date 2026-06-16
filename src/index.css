@@ -969,6 +969,12 @@ input[type=number] { -moz-appearance: textfield; }
   .bt-day-count { display: none; }
 }
 
+.bt-calendar.bt-compact { gap: 4px; }
+.bt-calendar.bt-compact .bt-cell { min-height: 56px; padding: 4px 6px; }
+.bt-calendar.bt-compact .bt-day-num { font-size: 11px; }
+.bt-calendar.bt-compact .bt-day-pnl { font-size: 12px; }
+.bt-calendar.bt-compact .bt-day-count { font-size: 9px; }
+
 /* ── Bet Tracker: add actions + modal ── */
 .bt-add-actions {
   display: flex;
