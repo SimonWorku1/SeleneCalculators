@@ -6,13 +6,14 @@
  * thin proxy that solves both. It receives the user's Kalshi credentials in the
  * call payload (the key is stored locally in the user's browser and sent only
  * per-sync — never persisted here), signs the requests, calls Kalshi's REST
- * API, and returns settled *and* still-open positions normalized into the
- * tracker's bet shape (open positions come back tagged `result: 'pending'`).
+ * API, and returns settled bets, open positions, and resting (unfilled)
+ * orders, all normalized into the tracker's bet shape — anything not yet
+ * settled comes back tagged `result: 'pending'`.
  *
  * IMPORTANT: Kalshi field names can change between API versions. The
- * normalization in `settlementToBet` / `positionToBet` is best-effort —
- * verify against the current /portfolio/settlements and /portfolio/positions
- * responses and adjust as needed.
+ * normalization in `settlementToBet` / `positionToBet` / `orderToBet` is
+ * best-effort — verify against the current /portfolio/settlements,
+ * /portfolio/positions, and /portfolio/orders responses and adjust as needed.
  *
  * ⚠️ TODO before a real/public launch: this function's Cloud Run service is
  * currently deployed with "Allow public access" (unauthenticated invocation)
@@ -152,6 +153,42 @@ function positionToBet(p) {
 }
 
 /**
+ * Map one resting (placed, not yet filled) Kalshi order to the tracker's bet
+ * shape, tagged `result: 'pending'`. Per Kalshi's GetOrders schema, prices
+ * come back as dollar-string fields (`yes_price_dollars` / `no_price_dollars`)
+ * and counts as fixed-point strings (`remaining_count_fp`) — only the
+ * *remaining* (unfilled) part of the order is still "at risk." Only
+ * `status=resting` orders are fetched: canceled orders have no money at
+ * risk, and filled orders already show up via /portfolio/positions.
+ */
+function orderToBet(o) {
+  const contracts = parseFloat(o.remaining_count_fp || 0)
+  if (contracts <= 0) return null
+  const side = o.side === 'no' ? 'NO' : 'YES'
+  const priceDollars = parseFloat((side === 'NO' ? o.no_price_dollars : o.yes_price_dollars) || 0)
+  const costDollars = contracts * priceDollars
+  if (costDollars <= 0) return null
+
+  const avgPriceCents = priceDollars * 100 // 1..99
+  const dec = 100 / avgPriceCents
+  const american = americanFromDecimal(dec)
+
+  return {
+    id: `kalshi-order-${o.order_id}`,
+    ticker: o.ticker,
+    date: String(o.created_time || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+    description: `${o.ticker} (${side})`,
+    sportsbook: 'Kalshi',
+    wager: +costDollars.toFixed(2),
+    odds: (american > 0 ? '+' : '') + american,
+    fmt: 'american',
+    dec,
+    result: 'pending',
+    source: 'kalshi',
+  }
+}
+
+/**
  * Callable function. From the app:
  *   const sync = httpsCallable(getFunctions(), 'syncKalshi')
  *   const { data } = await sync({ keyId, privateKey })  // -> { bets, count }
@@ -167,13 +204,15 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   }
 
   const bets = []
-  // TEMP debug counters — remove once positions sync is confirmed working
-  // against a real account. Lets us see what Kalshi actually returned
-  // without needing server log access.
+  // TEMP debug counters — remove once sync is confirmed working against a
+  // real account. Lets us see what Kalshi actually returned without needing
+  // server log access.
   let settlementsSeen = 0
   let positionsSeen = 0
+  let ordersSeen = 0
   let sampleSettlement = null
   let samplePosition = null
+  let sampleOrder = null
   try {
     await paginate('/portfolio/settlements', keyId, privateKey, (data) => {
       for (const s of data.settlements || []) {
@@ -183,8 +222,8 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         if (bet) bets.push(bet)
       }
     })
-    // Open (not yet settled) positions, so a bet shows up as "pending"
-    // immediately instead of waiting for the market to resolve.
+    // Open (not yet settled) positions, so a filled bet shows up as
+    // "pending" immediately instead of waiting for the market to resolve.
     // count_filter=position restricts results to markets with a non-zero
     // position (otherwise Kalshi returns every market ever traded).
     await paginate('/portfolio/positions', keyId, privateKey, (data) => {
@@ -195,6 +234,16 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         if (bet) bets.push(bet)
       }
     }, '&count_filter=position')
+    // Resting (placed but not yet filled) orders — money at risk that
+    // hasn't become a position yet, so it wouldn't show up above either.
+    await paginate('/portfolio/orders', keyId, privateKey, (data) => {
+      for (const o of data.orders || []) {
+        ordersSeen++
+        if (!sampleOrder) sampleOrder = o
+        const bet = orderToBet(o)
+        if (bet) bets.push(bet)
+      }
+    }, '&status=resting')
   } catch (err) {
     throw new HttpsError('internal', err.message)
   }
@@ -203,6 +252,6 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     bets,
     count: bets.length,
     syncedAt: new Date().toISOString(),
-    debug: { settlementsSeen, positionsSeen, sampleSettlement, samplePosition },
+    debug: { settlementsSeen, positionsSeen, ordersSeen, sampleSettlement, samplePosition, sampleOrder },
   }
 })

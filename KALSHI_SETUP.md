@@ -63,10 +63,12 @@ firebase deploy --only functions
 ```
 
 That deploys the callable **`syncKalshi`** function. It accepts
-`{ keyId, privateKey }`, signs the requests, calls Kalshi
-`/portfolio/settlements` (resolved bets) and `/portfolio/positions` (still-open
-bets, returned as `result: 'pending'`), and returns normalized bets — **no
-secrets to configure**, because the key comes from the client at call time.
+`{ keyId, privateKey }`, signs the requests, and calls three Kalshi
+endpoints — `/portfolio/settlements` (resolved bets), `/portfolio/positions`
+(filled but not-yet-settled bets), and `/portfolio/orders?status=resting`
+(placed but not-yet-filled bets) — returning all of them normalized into bets,
+with anything not yet settled tagged `result: 'pending'`. **No secrets to
+configure**, because the key comes from the client at call time.
 
 ---
 
@@ -92,14 +94,17 @@ secrets to configure**, because the key comes from the client at call time.
   `yes_total_cost`, `no_total_cost`, `revenue`, `settled_time`, `ticker`) to the
   tracker's `{ date, description, wager, odds, result }` shape. After your first
   real sync, eyeball the results and adjust if Kalshi has renamed fields.
-- **Open bets sync as "pending."** `positionToBet()` maps `/portfolio/positions`
-  (`position_fp`, `market_exposure_dollars`, `ticker`, `last_updated_ts` — per
-  Kalshi's GetPositions schema; note `market_exposure_dollars` is already in
-  dollars, not cents) tagged `result: 'pending'`, so a bet you've placed shows
-  up immediately instead of waiting for the market to settle. The Bet Tracker
-  UI shows a dedicated **Pending Bets** calendar for these. Each sync drops
-  the open-position placeholder for any ticker that now has a real
-  settlement, so it doesn't linger as a duplicate once the bet resolves.
+- **Open and unfilled bets sync as "pending."** `positionToBet()` maps
+  `/portfolio/positions` (`position_fp`, `market_exposure_dollars`, `ticker`,
+  `last_updated_ts`) for bets that have filled but not settled.
+  `orderToBet()` maps `/portfolio/orders?status=resting`
+  (`remaining_count_fp`, `yes_price_dollars`/`no_price_dollars`, `order_id`,
+  `ticker`, `created_time`) for bets placed but not yet filled — Kalshi's
+  numeric fields are dollar/fixed-point strings, not cents. Both are tagged
+  `result: 'pending'` and show on the Bet Tracker's dedicated **Pending
+  Bets** calendar. Each sync drops any old pending placeholder for a ticker
+  it touches at all (order filled → position, position settled, etc.) so
+  the fresh picture replaces it instead of duplicating.
 - **Odds conversion:** Kalshi contracts pay $1.00 (100¢), so your average fill
   price in cents is the implied probability → decimal odds = `100 / avgPriceCents`.
 - **Sandbox vs production:** switch `HOST` in `functions/index.js` to

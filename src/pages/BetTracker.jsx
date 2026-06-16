@@ -287,14 +287,14 @@ export default function BetTracker() {
       const incoming = Array.isArray(data?.bets) ? data.bets : []
       let added = 0
       setBets(prev => {
-        // A position that was "pending" in a prior sync now has a settled
-        // result for the same ticker — drop the old placeholder so it
-        // doesn't linger as a duplicate alongside the real settled bet.
-        const settledTickers = new Set(
-          incoming.filter(b => b.result !== 'pending' && b.ticker).map(b => b.ticker)
-        )
+        // A ticker can move between pending sources across syncs — a resting
+        // order fills (becomes a position), a position settles, etc. Drop any
+        // old pending placeholder for a ticker this sync touched at all, so
+        // it gets replaced by the fresh picture instead of lingering as a
+        // duplicate alongside it.
+        const touchedTickers = new Set(incoming.filter(b => b.ticker).map(b => b.ticker))
         const withoutStalePending = prev.filter(
-          b => !(b.source === 'kalshi' && b.result === 'pending' && settledTickers.has(b.ticker))
+          b => !(b.source === 'kalshi' && b.result === 'pending' && touchedTickers.has(b.ticker))
         )
         const ids = new Set(withoutStalePending.map(b => b.id))
         const fresh = incoming
