@@ -128,7 +128,8 @@ export default function BetTracker() {
   const [importMsg, setImportMsg] = useState('')
   const [genMsg, setGenMsg] = useState('')
   const [syncMsg, setSyncMsg] = useState('')
-  const [testEv, setTestEv] = useState('5')
+  const [showGen, setShowGen] = useState(false)
+  const [genCfg, setGenCfg] = useState({ betsPerDay: '5', evMin: '2', evMax: '8', bankroll: '1000', kelly: '0.5' })
   const [showManual, setShowManual] = useState(false)
   const [dayModal, setDayModal] = useState(null) // day number (in current view month) or null
   const [syncing, setSyncing] = useState(false)
@@ -226,32 +227,58 @@ export default function BetTracker() {
       return rand(otherMarkets)
     }
 
-    // Target EV as ROI per bet (% of stake). For decimal odds `dec`, the win
-    // probability that yields a given EV is p = (EV + 1) / dec, since
-    // EV = p·dec − 1. ~12% of bets are left pending and don't count toward P&L.
-    const targetRoi = (parseFloat(testEv) || 0) / 100
+    // Config from the popup: how many bets/day, the EV range each bet is drawn
+    // from, the starting bankroll, and the Kelly multiplier (fractional Kelly).
+    const betsPerDay = Math.max(1, Math.round(parseFloat(genCfg.betsPerDay) || 1))
+    let evMin = (parseFloat(genCfg.evMin) || 0) / 100
+    let evMax = (parseFloat(genCfg.evMax) || 0) / 100
+    if (evMin > evMax) [evMin, evMax] = [evMax, evMin]
+    const startBankroll = Math.max(0, parseFloat(genCfg.bankroll) || 0)
+    const kellyMult = Math.max(0, parseFloat(genCfg.kelly) || 0)
+
+    // Walk day by day, staking and settling each bet so the bankroll actually
+    // compounds. For decimal odds `dec` (profit multiple b = dec − 1):
+    //   • a per-bet edge `ev` (ROI) implies true win prob p = (ev + 1) / dec
+    //   • full-Kelly fraction f* = (p·b − q)/b = ev / b
+    //   • we stake bankroll · f* · kellyMult (fractional Kelly)
+    // A non-positive EV means Kelly says don't bet, so we skip it. ~8% of
+    // settled-eligible bets are left pending (open, no bankroll impact yet).
+    let bankroll = startBankroll
+    let placed = 0
+    let skipped = 0
+    let busted = false
 
     const made = []
     let seq = 0
-    // ~5 bets for every day of the month
-    for (let day = 1; day <= daysInMonth; day++) {
-      const perDay = 4 + Math.floor(Math.random() * 3) // 4–6 bets/day
-      for (let j = 0; j < perDay; j++) {
+    for (let day = 1; day <= daysInMonth && !busted; day++) {
+      for (let j = 0; j < betsPerDay; j++) {
+        if (bankroll <= 0) { busted = true; break }
         const odds = rand(americanOdds)
         const dec = toDecimal(odds, 'american')
-        const wager = Math.round((5 + Math.random() * 195) / 5) * 5 // $5–$200, step 5
+        const b = dec - 1
+        const ev = evMin + Math.random() * (evMax - evMin)
+        const kf = (ev / b) * kellyMult // fractional-Kelly stake fraction
+        if (kf <= 0) { skipped++; continue } // non-positive edge → no bet
+        let stake = Math.min(bankroll * kf, bankroll)
+        stake = Math.round(stake * 100) / 100
+        if (stake < 0.01) { skipped++; continue }
+
+        const p = Math.min(0.99, Math.max(0.01, (ev + 1) / dec))
         let result
-        if (Math.random() < 0.12) result = 'pending'
-        else {
-          const p = Math.min(0.97, Math.max(0.03, (targetRoi + 1) / dec))
-          result = Math.random() < p ? 'won' : 'lost'
-        }
+        if (Math.random() < 0.08) result = 'pending'
+        else result = Math.random() < p ? 'won' : 'lost'
+
+        // Settle into the bankroll now (pending bets stay open — no impact yet).
+        if (result === 'won') bankroll += stake * b
+        else if (result === 'lost') bankroll -= stake
+
+        placed++
         made.push({
           id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random() + seq++),
           date: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
           description: randomDescription(),
           sportsbook: rand(books),
-          wager,
+          wager: stake,
           odds: (odds > 0 ? '+' : '') + odds,
           fmt: 'american',
           dec,
@@ -261,8 +288,16 @@ export default function BetTracker() {
       }
     }
     setBets(prev => [...prev, ...made])
-    const evLabel = targetRoi === 0 ? 'break-even' : `${targetRoi > 0 ? '+' : ''}${(targetRoi * 100).toFixed(0)}% EV`
-    setGenMsg(`Added ${made.length} random test bets (${evLabel}, ~5/day) to ${MONTHS[month]} ${year}.`)
+    setShowGen(false)
+    const evLabel = evMin === evMax
+      ? `${(evMin * 100).toFixed(1)}% EV`
+      : `${(evMin * 100).toFixed(1)}–${(evMax * 100).toFixed(1)}% EV`
+    const net = bankroll - startBankroll
+    let msg = `Placed ${placed} bets (${evLabel}, ${betsPerDay}/day, ${kellyMult}× Kelly) in ${MONTHS[month]} ${year}. ` +
+      `Bankroll $${startBankroll.toFixed(2)} → $${bankroll.toFixed(2)} (${money(net)}).`
+    if (busted) msg += ' Bankroll hit $0 — stopped early.'
+    if (skipped) msg += ` ${skipped} skipped (non-positive EV).`
+    setGenMsg(msg)
   }
 
   function clearMonth() {
@@ -659,12 +694,8 @@ export default function BetTracker() {
         <h2>Add Bets</h2>
         <div className="bt-add-actions">
           <button className="btn btn-sm bt-action-btn" onClick={() => { setError(''); setForm(f => ({ ...f, date: todayISO() })); setShowManual(true) }}>+ Add Manual Bet</button>
-          <button className="btn btn-outline btn-sm bt-action-btn" onClick={generateTestBets}>🎲 Add Random Bets (~5/day)</button>
+          <button className="btn btn-outline btn-sm bt-action-btn" onClick={() => setShowGen(true)}>🎲 Add Random Bets</button>
           <button className="btn btn-outline btn-sm bt-action-btn" onClick={clearMonth} disabled={monthBets.length === 0}>🗑 Clear Month</button>
-          <div className="field" style={{ maxWidth: 170 }}>
-            <label>Random bet EV (ROI %)</label>
-            <input type="number" step="any" placeholder="5" value={testEv} onChange={e => setTestEv(e.target.value)} />
-          </div>
         </div>
         {genMsg && <div className="info-box" style={{ marginTop: 14 }}>{genMsg}</div>}
       </div>
@@ -862,6 +893,56 @@ export default function BetTracker() {
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Random-bet generator modal ── */}
+      {showGen && (
+        <div className="bt-modal-overlay" onClick={() => setShowGen(false)}>
+          <div className="bt-modal card" onClick={e => e.stopPropagation()}>
+            <div className="bt-month-nav">
+              <h2 style={{ margin: 0 }}>Generate Random Bets</h2>
+              <button className="bt-del" style={{ fontSize: 18 }} onClick={() => setShowGen(false)} title="Close">✕</button>
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 0 }}>
+              Simulates a season of betting for {MONTHS[month]} {year}. Each bet is sized
+              with fractional Kelly off a running bankroll, so wins and losses compound.
+            </p>
+            <form onSubmit={e => { e.preventDefault(); generateTestBets() }}>
+              <div className="field-group">
+                <div className="field">
+                  <label>Bets per day</label>
+                  <input type="number" min="1" step="1" placeholder="5" value={genCfg.betsPerDay}
+                    onChange={e => setGenCfg(c => ({ ...c, betsPerDay: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Min EV (ROI %)</label>
+                  <input type="number" step="any" placeholder="2" value={genCfg.evMin}
+                    onChange={e => setGenCfg(c => ({ ...c, evMin: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Max EV (ROI %)</label>
+                  <input type="number" step="any" placeholder="8" value={genCfg.evMax}
+                    onChange={e => setGenCfg(c => ({ ...c, evMax: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Starting bankroll ($)</label>
+                  <input type="number" min="0" step="any" placeholder="1000" value={genCfg.bankroll}
+                    onChange={e => setGenCfg(c => ({ ...c, bankroll: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Kelly multiplier</label>
+                  <input type="number" min="0" step="any" placeholder="0.5" value={genCfg.kelly}
+                    onChange={e => setGenCfg(c => ({ ...c, kelly: e.target.value }))} />
+                </div>
+              </div>
+              <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '4px 0 12px' }}>
+                Each bet draws a random edge in your EV range. A multiplier of 1 = full
+                Kelly, 0.5 = half Kelly. Non-positive-EV draws are skipped.
+              </p>
+              <button className="btn" type="submit">🎲 Generate</button>
+            </form>
           </div>
         </div>
       )}
