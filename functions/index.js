@@ -464,7 +464,7 @@ exports.sharpSportsContext = onCall(
  * or `internalId` to resolve the bettor created during linking.
  */
 exports.syncSharpSports = onCall(
-  { cors: true, secrets: [SHARPSPORTS_PUBLIC_KEY, SHARPSPORTS_PRIVATE_KEY] },
+  { cors: true, secrets: [SHARPSPORTS_PUBLIC_KEY] },
   async (request) => {
     // The Public key reads BetSync data (and is the only key in sandbox);
     // prefer a Private key only if you actually have one (live/paid).
