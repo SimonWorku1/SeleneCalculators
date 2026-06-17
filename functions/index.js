@@ -24,6 +24,7 @@
  */
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
+const { defineSecret } = require('firebase-functions/params')
 const crypto = require('crypto')
 
 // Production host. Use https://demo-api.kalshi.co for the sandbox.
@@ -289,3 +290,210 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     syncedAt: new Date().toISOString(),
   }
 })
+
+/* ════════════════════════════════════════════════════════════════════════
+ * SharpSports (BetSync) sync — traditional sportsbooks via account linking.
+ *
+ * Unlike Kalshi (where each user supplies their own key), SharpSports is a
+ * B2B account-linking provider: YOU (the developer) hold one Public + one
+ * Private API key for the whole app, and your users link their sportsbook
+ * accounts through SharpSports' hosted Booklink UI. The keys live here as
+ * Firebase secrets and never reach the browser:
+ *
+ *   firebase functions:secrets:set SHARPSPORTS_PUBLIC_KEY
+ *   firebase functions:secrets:set SHARPSPORTS_PRIVATE_KEY
+ *
+ * The dashboard defaults to the SANDBOX environment, where the test bettor
+ * "gooduser" / "Test1" has accounts on every book with representative bet
+ * history — no real money, no real credentials. See SHARPSPORTS_SETUP.md.
+ *
+ * Two callables:
+ *   • sharpSportsContext({ internalId, redirectUrl? })
+ *       Public key → POST /v1/context → returns a context id (cid) and the
+ *       Booklink URL the browser opens so the user can link a book.
+ *   • syncSharpSports({ internalId | bettorId })
+ *       Private key → resolves the bettor, lists their linked accounts (to
+ *       label each bet with its sportsbook), pulls /v1/betSlips, and returns
+ *       them normalized into the tracker's bet shape.
+ *
+ * ⚠️ Field mapping is best-effort (same caveat as the Kalshi mapper). In
+ * particular SharpSports returns money amounts as integer CENTS — if your
+ * first sandbox sync shows dollar figures 100× off, flip SS_AMOUNT_DIVISOR.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+const SHARPSPORTS_PUBLIC_KEY = defineSecret('SHARPSPORTS_PUBLIC_KEY')
+const SHARPSPORTS_PRIVATE_KEY = defineSecret('SHARPSPORTS_PRIVATE_KEY')
+
+const SS_HOST = 'https://api.sharpsports.io'
+const SS_API = '/v1'
+const SS_UI = 'https://ui.sharpsports.io'
+// SharpSports money fields (atRisk / toWin / payout) are integer cents.
+// Flip to 1 if a sandbox sync shows amounts 100× too large.
+const SS_AMOUNT_DIVISOR = 100
+
+// Authenticated GET against the SharpSports REST API. `token` is the public
+// key for linking/discovery calls and the private key for bet data.
+async function ssGet(path, token) {
+  const res = await fetch(`${SS_HOST}${SS_API}${path}`, {
+    headers: { Authorization: `Token ${token}`, 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`SharpSports ${res.status} ${res.statusText}: ${body.slice(0, 300)}`)
+  }
+  return res.json()
+}
+
+// SharpSports list endpoints sometimes return a bare array and sometimes an
+// envelope ({ results: [...] } / { data: [...] }). Normalize to an array.
+function ssList(resp) {
+  if (Array.isArray(resp)) return resp
+  return resp?.results || resp?.data || resp?.betSlips || resp?.bettors || []
+}
+
+// Decimal odds from a slip's risk/return, used only when SharpSports doesn't
+// hand us explicit odds. atRisk + toWin = total return, so the ratio is
+// unit-independent (cents vs dollars cancels out).
+function decFromRisk(atRisk, toWin) {
+  const stake = Number(atRisk)
+  const profit = Number(toWin)
+  if (!(stake > 0) || !(profit >= 0)) return null
+  return (stake + profit) / stake
+}
+
+// Human-readable description for a slip: a single bet's book description, or
+// an "N-leg parlay" label when the slip has multiple legs.
+function describeSlip(s) {
+  const bets = Array.isArray(s.bets) ? s.bets : []
+  if (bets.length > 1) return `${bets.length}-leg parlay`
+  const b = bets[0] || {}
+  if (b.bookDescription) return b.bookDescription
+  if (b.proposition) return b.proposition
+  const ev = b.event || {}
+  const sel = b.marketSelection || {}
+  const team = sel.displayName || sel.team || sel.position
+  if (team && ev.league) return `${team} — ${ev.league}`
+  return s.bookDescription || team || 'Bet'
+}
+
+// Map one SharpSports status to the tracker's result vocabulary.
+function ssResult(status) {
+  const v = String(status || '').toLowerCase()
+  if (v === 'won' || v === 'win' || v.includes('won')) return 'won'
+  if (v === 'lost' || v === 'loss' || v.includes('lost')) return 'lost'
+  if (v === 'push' || v === 'canceled' || v === 'cancelled' || v.includes('refund') || v === 'void') return 'push'
+  return 'pending' // pending / live / unsettled / unknown
+}
+
+/**
+ * Normalize one SharpSports BetSlip into the tracker's bet shape. Odds are
+ * taken from the slip's explicit fields when present, else derived from the
+ * risk/return ratio. `wager`/`toWin` are converted from cents to dollars.
+ */
+function betSlipToBet(s, bookByAccount) {
+  const wager = Number(s.atRisk) / SS_AMOUNT_DIVISOR
+  const toWin = Number(s.toWin) / SS_AMOUNT_DIVISOR
+  if (!(wager > 0)) return null
+
+  const decExplicit = Number(s.oddsDecimal) > 1 ? Number(s.oddsDecimal) : null
+  const dec = decExplicit || decFromRisk(s.atRisk, s.toWin) || null
+  const american = Number.isFinite(Number(s.oddsAmerican)) && Number(s.oddsAmerican) !== 0
+    ? Math.round(Number(s.oddsAmerican))
+    : (dec ? americanFromDecimal(dec) : 0)
+
+  const sportsbook =
+    s.book?.name || s.book?.abbr || bookByAccount[s.bettorAccountId] || 'Sportsbook'
+
+  return {
+    id: `ss-${s.id}`,
+    slipId: s.id,
+    placedAt: s.placedAt || s.timePlaced || s.gradedAt || null,
+    description: describeSlip(s),
+    sportsbook,
+    wager: +wager.toFixed(2),
+    toWin: +toWin.toFixed(2),
+    odds: (american > 0 ? '+' : '') + american,
+    fmt: 'american',
+    dec: dec || (american >= 100 ? american / 100 + 1 : american <= -100 ? 100 / Math.abs(american) + 1 : 1),
+    result: ssResult(s.status),
+    type: s.type || (Array.isArray(s.bets) && s.bets.length > 1 ? 'parlay' : 'single'),
+    source: 'sharpsports',
+  }
+}
+
+/**
+ * Create a betSync context and return the Booklink URL the browser should
+ * open. Uses the PUBLIC key. `internalId` ties the SharpSports bettor to your
+ * own user record so a later sync can find them again.
+ */
+exports.sharpSportsContext = onCall(
+  { cors: true, secrets: [SHARPSPORTS_PUBLIC_KEY] },
+  async (request) => {
+    const publicKey = SHARPSPORTS_PUBLIC_KEY.value() || process.env.SHARPSPORTS_PUBLIC_KEY
+    if (!publicKey) {
+      throw new HttpsError('failed-precondition', 'SHARPSPORTS_PUBLIC_KEY is not set. See SHARPSPORTS_SETUP.md.')
+    }
+    const internalId = request.data?.internalId
+    if (!internalId) throw new HttpsError('invalid-argument', 'Missing internalId.')
+    const redirectUrl = request.data?.redirectUrl
+
+    const res = await fetch(`${SS_HOST}${SS_API}/context`, {
+      method: 'POST',
+      headers: { Authorization: `Token ${publicKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ internalId }),
+    })
+    if (!res.ok) {
+      const body = await res.text()
+      throw new HttpsError('internal', `SharpSports context ${res.status}: ${body.slice(0, 300)}`)
+    }
+    const data = await res.json()
+    const cid = data.cid || data.id
+    if (!cid) throw new HttpsError('internal', 'SharpSports did not return a context id.')
+    const linkUrl = `${SS_UI}/link/${cid}` + (redirectUrl ? `?redirectUrl=${encodeURIComponent(redirectUrl)}` : '')
+    return { cid, linkUrl, internalId }
+  }
+)
+
+/**
+ * Pull a bettor's BetSlips and return them normalized. Uses the PRIVATE key.
+ * Pass `bettorId` directly (e.g. the sandbox test bettor from the dashboard)
+ * or `internalId` to resolve the bettor created during linking.
+ */
+exports.syncSharpSports = onCall(
+  { cors: true, secrets: [SHARPSPORTS_PRIVATE_KEY] },
+  async (request) => {
+    const privateKey = SHARPSPORTS_PRIVATE_KEY.value() || process.env.SHARPSPORTS_PRIVATE_KEY
+    if (!privateKey) {
+      throw new HttpsError('failed-precondition', 'SHARPSPORTS_PRIVATE_KEY is not set. See SHARPSPORTS_SETUP.md.')
+    }
+    let bettorId = request.data?.bettorId
+    const internalId = request.data?.internalId
+
+    try {
+      // Resolve the bettor from internalId if an explicit id wasn't supplied.
+      if (!bettorId) {
+        if (!internalId) throw new HttpsError('invalid-argument', 'Provide a bettorId or internalId.')
+        const bettors = ssList(await ssGet(`/bettors?internalId=${encodeURIComponent(internalId)}`, privateKey))
+        const match = bettors.find(b => b.internalId === internalId) || (bettors.length === 1 ? bettors[0] : null)
+        if (!match) {
+          throw new HttpsError('failed-precondition', 'No linked bettor found for that internalId yet — link a sportsbook first.')
+        }
+        bettorId = match.id
+      }
+
+      // Map each linked account id → sportsbook name so every bet is labeled.
+      const accounts = ssList(await ssGet(`/bettorAccounts?bettorId=${encodeURIComponent(bettorId)}`, privateKey))
+      const bookByAccount = {}
+      for (const a of accounts) bookByAccount[a.id] = a.book?.name || a.book?.abbr || 'Sportsbook'
+
+      // Pull the bettor's bet slips and normalize.
+      const slips = ssList(await ssGet(`/betSlips?bettorId=${encodeURIComponent(bettorId)}&limit=500`, privateKey))
+      const bets = slips.map(s => betSlipToBet(s, bookByAccount)).filter(Boolean)
+
+      return { bets, count: bets.length, bettorId, accounts: accounts.length, syncedAt: new Date().toISOString() }
+    } catch (err) {
+      if (err instanceof HttpsError) throw err
+      throw new HttpsError('internal', err.message)
+    }
+  }
+)

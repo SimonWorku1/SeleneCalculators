@@ -38,6 +38,11 @@ export default function Home() {
           <h3>Bet Tracker</h3>
           <p>Log your bets, wagers, and odds. See daily profit and loss on a calendar and chart your cumulative or daily results across the month.</p>
         </Link>
+        <Link to="/sharpsports" className="calc-card">
+          <div className="icon">🔗</div>
+          <h3>SharpSports Sync</h3>
+          <p>Link a sportsbook through SharpSports BetSync and automatically pull your bet slips into a monthly P&amp;L calendar and detailed bet list.</p>
+        </Link>
       </div>
     </div>
   )

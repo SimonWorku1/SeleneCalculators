@@ -7,6 +7,7 @@ import Devigger from './pages/Devigger.jsx'
 import EVCalculator from './pages/EVCalculator.jsx'
 import BonusBet from './pages/BonusBet.jsx'
 import BetTracker from './pages/BetTracker.jsx'
+import SharpSports from './pages/SharpSports.jsx'
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/ev-calculator" element={<EVCalculator />} />
         <Route path="/bonus-bet" element={<BonusBet />} />
         <Route path="/bet-tracker" element={<BetTracker />} />
+        <Route path="/sharpsports" element={<SharpSports />} />
       </Routes>
     </>
   )
