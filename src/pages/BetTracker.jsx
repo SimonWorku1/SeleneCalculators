@@ -514,8 +514,18 @@ export default function BetTracker() {
   }
 
   function find(headers, ...names) {
+    // Exact match first — keeps our own Export CSV (date/description/…) and any
+    // book whose header is exactly one of these from being grabbed by a looser
+    // substring rule below.
     for (const name of names) {
       const idx = headers.findIndex(h => h === name)
+      if (idx !== -1) return idx
+    }
+    // Then fall back to substring, so multi-word headers from a real export
+    // still map — e.g. a Pikkit Pro CSV's "Date Placed", "Time Settled",
+    // "Bet Amount", or "American Odds".
+    for (const name of names) {
+      const idx = headers.findIndex(h => h.includes(name))
       if (idx !== -1) return idx
     }
     return -1
@@ -531,13 +541,17 @@ export default function BetTracker() {
         const rows = parseCsv(String(reader.result)).filter(r => r.some(c => c.trim() !== ''))
         if (rows.length < 2) { setImportMsg('No data rows found in CSV.'); return }
         const headers = rows[0].map(h => h.trim().toLowerCase())
-        const iDate = find(headers, 'date', 'placed', 'created', 'settled_time', 'created_time')
-        const iDesc = find(headers, 'description', 'market', 'title', 'event', 'ticker')
+        // Specific tokens are listed before generic ones so the substring
+        // fallback in find() picks the intended column (e.g. "Date Placed"
+        // over "Date Settled"). The aliases cover common sportsbook/Pikkit
+        // export headers in addition to our own Export CSV columns.
+        const iDate = find(headers, 'date placed', 'placed', 'time placed', 'bet date', 'date', 'created_time', 'created', 'timestamp', 'settled_time')
+        const iDesc = find(headers, 'description', 'selection', 'bet description', 'bet name', 'market', 'title', 'event', 'wager type', 'bet type', 'ticker')
         const iBook = find(headers, 'sportsbook', 'book', 'source', 'platform')
-        const iWager = find(headers, 'wager', 'stake', 'amount', 'cost', 'risk')
-        const iOdds = find(headers, 'odds', 'price', 'american', 'decimal')
-        const iFmt = find(headers, 'format', 'odds_format')
-        const iResult = find(headers, 'result', 'status', 'outcome')
+        const iWager = find(headers, 'wager', 'stake', 'wagered', 'bet amount', 'stake amount', 'risk amount', 'amount', 'cost', 'risk')
+        const iOdds = find(headers, 'odds', 'american odds', 'decimal odds', 'price', 'american', 'decimal')
+        const iFmt = find(headers, 'format', 'odds_format', 'odds format')
+        const iResult = find(headers, 'result', 'status', 'bet status', 'outcome', 'settlement')
         if (iDate === -1 || iWager === -1 || iOdds === -1) {
           setImportMsg('CSV needs at least date, wager, and odds columns. See the expected format note below.')
           return
@@ -700,7 +714,7 @@ export default function BetTracker() {
             </div>
             {importMsg && <div className="info-box" style={{ marginTop: 14 }}>{importMsg}</div>}
             <div className="info-box" style={{ marginTop: 14 }}>
-              <strong>Import CSV</strong> works for any sportsbook export (or Kalshi, if you'd rather not connect a key): the importer matches columns by name — <strong>date</strong>, <strong>wager</strong> (or stake/amount/cost), and <strong>odds</strong> (or price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong>. Clear Month / Clear All Bets remove what's stored locally.
+              <strong>Import CSV</strong> works for any sportsbook export — including a <strong>Pikkit Pro</strong> "Export to CSV" (which already contains every book Pikkit's BookSync pulled in for you) or a Kalshi export. The importer matches columns by name, exact first then loosely, so headers like <em>Date Placed</em>, <em>Bet Amount</em>, or <em>American Odds</em> still map: it needs <strong>date</strong>, <strong>wager</strong> (stake/amount/cost), and <strong>odds</strong> (price), plus optional <strong>description</strong>, <strong>sportsbook</strong>, <strong>format</strong>, and <strong>result</strong> (status). Clear Month / Clear All Bets remove what's stored locally.
             </div>
           </div>
         </div>
