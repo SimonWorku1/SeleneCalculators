@@ -326,7 +326,6 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
  * ════════════════════════════════════════════════════════════════════════ */
 
 const SHARPSPORTS_PUBLIC_KEY = defineSecret('SHARPSPORTS_PUBLIC_KEY')
-const SHARPSPORTS_PRIVATE_KEY = defineSecret('SHARPSPORTS_PRIVATE_KEY')
 
 const SS_HOST = 'https://api.sharpsports.io'
 const SS_API = '/v1'
@@ -469,7 +468,7 @@ exports.syncSharpSports = onCall(
     // The Public key reads BetSync data (and is the only key in sandbox);
     // prefer a Private key only if you actually have one (live/paid).
     const apiKey =
-      SHARPSPORTS_PRIVATE_KEY.value() || process.env.SHARPSPORTS_PRIVATE_KEY ||
+      process.env.SHARPSPORTS_PRIVATE_KEY ||
       SHARPSPORTS_PUBLIC_KEY.value() || process.env.SHARPSPORTS_PUBLIC_KEY
     if (!apiKey) {
       throw new HttpsError('failed-precondition', 'Set SHARPSPORTS_PUBLIC_KEY (sandbox) or SHARPSPORTS_PRIVATE_KEY (live). See SHARPSPORTS_SETUP.md.')
