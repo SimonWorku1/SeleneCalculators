@@ -16,12 +16,15 @@ This page works in two modes:
   SharpSports **sandbox** keys, link a book with the test login
   `gooduser` / `Test1`, and click **Sync bets**.
 
-> **Do you need to give me an API key?** To make a *live* sandbox sync work,
-> yes — I need a SharpSports **sandbox Public API Key** and **sandbox Private
-> API Key** (Dashboard → Settings → API Keys; the dashboard defaults to
-> sandbox). Until those are set, the page still runs in sample mode. **Never**
-> paste the Private key into the frontend or commit it — it goes into a
-> Firebase secret (below).
+> **Do you need to give me an API key?** For a *live* sandbox sync, I need your
+> SharpSports **sandbox Public API Key** (Dashboard → Settings → API Keys). In
+> the free sandbox that's the **only** key issued — and per SharpSports'
+> QuickStart the Public key is what reads BetSync data (bettors, accounts,
+> betSlips) anyway, so **no Private key is required**. A Private key only
+> appears on a paid/live plan; the code uses it automatically if you ever set
+> one. Even though it's called "public," it can read your org's bet data, so it
+> stays server-side in a Firebase secret — never commit it or put it in the
+> frontend.
 
 ---
 
@@ -145,15 +148,16 @@ ORDER BY placed_date;
 
 ## C. The SharpSports API call sequence
 
-Every request is authenticated with a header — **Public** key for
-linking/discovery, **Private** key for bet data:
+Every request is authenticated with the same header. In **sandbox** every call
+below uses your **Public** key (the only key issued there); on a paid/live plan
+you may use the Private key for the server-side reads instead:
 
 ```
 Authorization: Token <API_KEY>
 ```
 
 ```
-# 1. Create a betSync context            [PUBLIC key]   → our sharpSportsContext()
+# 1. Create a betSync context            [Public key]   → our sharpSportsContext()
 POST https://api.sharpsports.io/v1/context
      { "internalId": "<your users.internal_id>" }
   ← { "cid": "CONTEXT_xxx", ... }
@@ -167,20 +171,20 @@ GET  https://ui.sharpsports.io/link/<cid>
 # 3. (async) SharpSports creates a bettor + bettorAccount tied to internalId.
 #    Register a webhookUrl on the context to be pushed updates instead of polling.
 
-# 4. Resolve the bettor                   [PRIVATE key]  → our syncSharpSports()
+# 4. Resolve the bettor                   [Public key]   → our syncSharpSports()
 GET  https://api.sharpsports.io/v1/bettors?internalId=<your users.internal_id>
   ← [ { "id": "BETTOR_xxx", "internalId": "...", ... } ]
 
-# 5. List linked accounts (to label each bet with its book)   [PRIVATE key]
+# 5. List linked accounts (to label each bet with its book)   [Public key]
 GET  https://api.sharpsports.io/v1/bettorAccounts?bettorId=BETTOR_xxx
   ← [ { "id": "BACCT_xxx", "book": { "name": "DraftKings", "abbr": "dk" } } ]
 
-# 6. Pull bet slips                        [PRIVATE key]
+# 6. Pull bet slips                        [Public key]
 GET  https://api.sharpsports.io/v1/betSlips?bettorId=BETTOR_xxx&limit=500
   ← [ { id, bettorAccountId, status, atRisk, toWin, payout,
         oddsAmerican, oddsDecimal, placedAt, gradedAt, bets:[ ... ] } ]
 
-# 7. (later) Refresh to pull new bets      [PRIVATE key]
+# 7. (later) Refresh to pull new bets      [Public key]
 POST https://api.sharpsports.io/v1/bettorAccounts/BACCT_xxx/refresh
      # sandbox: a refresh generates a few new random live slips, graded after the event
 ```
@@ -200,9 +204,12 @@ Two callables live in [`functions/index.js`](functions/index.js):
 `sharpSportsContext` (Public key) and `syncSharpSports` (Private key).
 
 ```bash
-# 1. Store your sandbox keys as Firebase secrets (never in the frontend)
+# 1. Store your sandbox Public key as a Firebase secret (never in the frontend).
+#    This is the only key required; sandbox doesn't issue a Private key.
 firebase functions:secrets:set SHARPSPORTS_PUBLIC_KEY
-firebase functions:secrets:set SHARPSPORTS_PRIVATE_KEY
+
+#    Optional — only if you're on a paid/live plan and have one:
+#    firebase functions:secrets:set SHARPSPORTS_PRIVATE_KEY
 
 # 2. Deploy
 cd functions && npm install && cd ..

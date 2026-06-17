@@ -283,7 +283,7 @@ export default function SharpSports() {
             )}
 
             <div className="info-box" style={{ marginTop: 14 }}>
-              SharpSports is an account-linking provider (think “Plaid for sportsbooks”). Your app holds one Public + Private API key server-side; users link their books in SharpSports’ hosted UI, so credentials never touch this site. The dashboard defaults to <strong>sandbox</strong> — link with <code>gooduser</code> / <code>Test1</code>. Setup &amp; the API call sequence are in <strong>SHARPSPORTS_SETUP.md</strong>.
+              SharpSports is an account-linking provider (think “Plaid for sportsbooks”). Your app holds its API key server-side — in the free <strong>sandbox</strong> that's just the <strong>Public key</strong> (no Private key needed); users link their books in SharpSports’ hosted UI, so credentials never touch this site. Link with <code>gooduser</code> / <code>Test1</code>. Setup &amp; the API call sequence are in <strong>SHARPSPORTS_SETUP.md</strong>.
             </div>
           </div>
 
