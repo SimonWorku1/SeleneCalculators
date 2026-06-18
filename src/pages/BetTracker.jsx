@@ -33,22 +33,29 @@ const todayISO = () => {
 
 const money = (n) => (n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`)
 
-// Compact dollar label for calendar cells: no cents, max 3 numeral digits.
-// $0–$999 → $234 | $1k–$999k → $1.6K | $1M+ → $1.01M
+// Suffixes for each power of 1000: thousand, million, billion, trillion,
+// quadrillion, quintillion, sextillion, septillion, octillion, nonillion,
+// decillion. Beyond that we keep the last suffix and just grow the mantissa.
+const MONEY_UNITS = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No', 'Dc']
+
+// Compact dollar label: no cents, kept to ~3 significant digits, rolling
+// through K/M/B/T/… as the magnitude grows.
+// $0–$999 → $234 | $1.6K | $1.01M | $260B | $2.77T
 function calMoney(n) {
   const sign = n > 0 ? '+' : n < 0 ? '-' : ''
-  const abs = Math.abs(n)
-  let str
-  if (abs >= 1_000_000) {
-    const m = abs / 1_000_000
-    str = '$' + (m % 1 === 0 ? m.toFixed(0) : m >= 10 ? m.toFixed(1) : m.toFixed(2)) + 'M'
-  } else if (abs >= 1_000) {
-    const k = abs / 1_000
-    str = '$' + (k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)) + 'K'
-  } else {
-    str = '$' + Math.round(abs)
-  }
-  return sign + str
+  let abs = Math.abs(n)
+  if (!isFinite(abs)) return sign + '$∞'
+  if (abs < 1000) return sign + '$' + Math.round(abs)
+
+  let u = 0
+  while (abs >= 1000 && u < MONEY_UNITS.length - 1) { abs /= 1000; u++ }
+  // abs is now in [1, 1000): trim to ~3 significant digits.
+  let m = abs >= 100 ? abs.toFixed(0) : abs >= 10 ? abs.toFixed(1) : abs.toFixed(2)
+  // Rounding can push the mantissa to 1000 (e.g. 999.96 → "1000"); roll up.
+  if (parseFloat(m) >= 1000 && u < MONEY_UNITS.length - 1) { u++; m = (abs / 1000).toFixed(2) }
+  // Drop trailing zeros so whole values read 1K, not 1.00K.
+  m = String(parseFloat(m))
+  return sign + '$' + m + MONEY_UNITS[u]
 }
 
 function loadBets() {
