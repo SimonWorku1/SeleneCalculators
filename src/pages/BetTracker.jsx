@@ -781,8 +781,8 @@ export default function BetTracker() {
           <div className="card">
             <h2>{MONTHS[month]} {year} — Summary</h2>
             <div className="result-grid">
-              <div className="result-item"><div className="label">Net P&amp;L</div><div className={`value ${stats.profit >= 0 ? 'green' : 'red'}`}>{money(stats.profit)}</div></div>
-              <div className="result-item"><div className="label">Total Wagered</div><div className="value">${stats.wagered.toFixed(2)}</div></div>
+              <div className="result-item"><div className="label">Net P&amp;L</div><div className={`value ${stats.profit >= 0 ? 'green' : 'red'}`}>{calMoney(stats.profit)}</div></div>
+              <div className="result-item"><div className="label">Total Wagered</div><div className="value">{calMoney(stats.wagered).replace(/^\+/, '')}</div></div>
               <div className="result-item"><div className="label">ROI</div><div className={`value ${(stats.roi ?? 0) >= 0 ? 'green' : 'red'}`}>{stats.roi === null ? '—' : `${stats.roi >= 0 ? '+' : ''}${stats.roi.toFixed(1)}%`}</div></div>
               <div className="result-item"><div className="label">Win Rate</div><div className="value blue">{stats.winRate === null ? '—' : `${stats.winRate.toFixed(0)}%`}</div></div>
               <div className="result-item"><div className="label">Record (W-L)</div><div className="value yellow">{stats.won}–{stats.lost}{stats.pending ? ` · ${stats.pending} open` : ''}</div></div>
@@ -835,7 +835,7 @@ export default function BetTracker() {
                       </button>
                     </td>
                     <td style={{ color: b.result === 'pending' ? 'var(--text-muted)' : p > 0 ? 'var(--accent-green)' : p < 0 ? 'var(--accent-red)' : 'var(--text)', fontWeight: 600 }}>
-                      {b.result === 'pending' ? '—' : money(p)}
+                      {b.result === 'pending' ? '—' : calMoney(p)}
                     </td>
                     <td><button className="bt-del" onClick={() => removeBet(b.id)} title="Delete bet">✕</button></td>
                   </tr>
@@ -868,7 +868,7 @@ export default function BetTracker() {
                         <span className="bt-bubble-desc">{b.description}</span>
                         {!pending && (
                           <span className={`bt-bubble-pnl ${p > 0 ? 'green' : p < 0 ? 'red' : ''}`}>
-                            {b.result === 'push' ? 'Push' : money(p)}
+                            {b.result === 'push' ? 'Push' : calMoney(p)}
                           </span>
                         )}
                         {pending && <span className="badge badge-blue">Pending</span>}
