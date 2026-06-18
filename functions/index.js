@@ -252,12 +252,14 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   }
 
   const bets = []
+  let rawFirstSettlement = null  // returned for diagnostics; remove once field names are confirmed
   // Caches GetMarket lookups by ticker for the life of this sync call, since
   // the same market often appears across settlements/positions/orders.
   const marketCache = new Map()
   try {
     await paginate('/portfolio/settlements', keyId, privateKey, async (data) => {
       for (const s of data.settlements || []) {
+        if (!rawFirstSettlement) rawFirstSettlement = s
         const bet = await settlementToBet(s, marketCache)
         if (bet) bets.push(bet)
       }
@@ -288,6 +290,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     bets,
     count: bets.length,
     syncedAt: new Date().toISOString(),
+    _rawFirstSettlement: rawFirstSettlement,
   }
 })
 

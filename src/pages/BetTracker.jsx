@@ -33,6 +33,24 @@ const todayISO = () => {
 
 const money = (n) => (n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`)
 
+// Compact dollar label for calendar cells: no cents, max 3 numeral digits.
+// $0–$999 → $234 | $1k–$999k → $1.6K | $1M+ → $1.01M
+function calMoney(n) {
+  const sign = n > 0 ? '+' : n < 0 ? '-' : ''
+  const abs = Math.abs(n)
+  let str
+  if (abs >= 1_000_000) {
+    const m = abs / 1_000_000
+    str = '$' + (m % 1 === 0 ? m.toFixed(0) : m >= 10 ? m.toFixed(1) : m.toFixed(2)) + 'M'
+  } else if (abs >= 1_000) {
+    const k = abs / 1_000
+    str = '$' + (k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)) + 'K'
+  } else {
+    str = '$' + Math.round(abs)
+  }
+  return sign + str
+}
+
 function loadBets() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -374,7 +392,10 @@ export default function BetTracker() {
         added = fresh.length
         return [...withoutStalePending, ...fresh]
       })
-      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned).`)
+      const diagMsg = data?._rawFirstSettlement
+        ? ` [debug fields: ${Object.keys(data._rawFirstSettlement).join(', ')}]`
+        : incoming.length === 0 ? ' [no settlements returned by Kalshi]' : ''
+      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned).${diagMsg}`)
     } catch (e) {
       setSyncMsg(`Kalshi sync failed: ${e.message || e}. The syncKalshi Cloud Function must be deployed first — see KALSHI_SETUP.md.`)
     } finally {
@@ -746,7 +767,7 @@ export default function BetTracker() {
                     <div className="bt-day-num">{day}</div>
                     {has && (
                       <>
-                        <div className={`bt-day-pnl ${pnl > 0 ? 'green' : pnl < 0 ? 'red' : ''}`}>{pnl === 0 ? '$0' : money(pnl)}</div>
+                        <div className={`bt-day-pnl ${pnl > 0 ? 'green' : pnl < 0 ? 'red' : ''}`}>{pnl === 0 ? '$0' : calMoney(pnl)}</div>
                         <div className="bt-day-count">{count} bet{count === 1 ? '' : 's'}</div>
                       </>
                     )}
