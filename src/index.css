@@ -1042,7 +1042,29 @@ input[type=number] { -moz-appearance: textfield; }
 
 /* ── Bet Tracker: source tabs, Kalshi key input, tutorial ── */
 .bt-source-tabs {
+  margin-bottom: 0;
+}
+
+.bt-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   margin-bottom: 20px;
+}
+
+.bt-open-toggle {
+  width: auto;
+  white-space: nowrap;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.bt-open-toggle.active {
+  border-color: rgba(63,185,80,0.5);
+  background: rgba(63,185,80,0.10);
+  color: var(--accent-green);
 }
 
 .bt-secret {

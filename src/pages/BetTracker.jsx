@@ -8,6 +8,7 @@ const KALSHI_PRIVKEY = 'selene_kalshi_private_key'
 const KALSHI_BALANCE = 'selene_kalshi_balance'
 const KALSHI_TRANSFERS = 'selene_kalshi_transfers'
 const KALSHI_BAL_HISTORY = 'selene_kalshi_balance_history'
+const SHOW_OPEN = 'selene_show_open'
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -172,6 +173,10 @@ export default function BetTracker() {
   const [dayModal, setDayModal] = useState(null) // day number (in current view month) or null
   const [syncing, setSyncing] = useState(false)
   const [sourceTab, setSourceTab] = useState('all') // all | manual | kalshi
+  // Global toggle: include open/pending positions across every view.
+  const [showOpen, setShowOpen] = useState(() => {
+    try { return localStorage.getItem(SHOW_OPEN) !== 'false' } catch { return true }
+  })
   // Kalshi account snapshot + cash-flow ledger from the last sync.
   const [kBalance, setKBalance] = useState(() => {
     try { return JSON.parse(localStorage.getItem(KALSHI_BALANCE) || 'null') } catch { return null }
@@ -206,6 +211,9 @@ export default function BetTracker() {
   useEffect(() => {
     try { localStorage.setItem(KALSHI_BAL_HISTORY, JSON.stringify(balanceHistory)) } catch { /* ignore quota */ }
   }, [balanceHistory])
+  useEffect(() => {
+    try { localStorage.setItem(SHOW_OPEN, String(showOpen)) } catch { /* ignore */ }
+  }, [showOpen])
 
   /* ── add bet ── */
   function addBet(e) {
@@ -490,11 +498,12 @@ export default function BetTracker() {
     return { manual, kalshi, all: monthBets.length }
   }, [monthBets])
 
-  // bets visible under the current source tab
+  // bets visible under the current source tab (and open-positions toggle)
   const viewBets = useMemo(() => {
-    if (sourceTab === 'all') return monthBets
-    return monthBets.filter(b => (sourceTab === 'kalshi' ? b.source === 'kalshi' : b.source !== 'kalshi'))
-  }, [monthBets, sourceTab])
+    let r = sourceTab === 'all' ? monthBets : monthBets.filter(b => (sourceTab === 'kalshi' ? b.source === 'kalshi' : b.source !== 'kalshi'))
+    if (!showOpen) r = r.filter(b => b.result !== 'pending')
+    return r
+  }, [monthBets, sourceTab, showOpen])
 
   // per-day net P&L (settled only)
   const dayPnl = useMemo(() => {
@@ -614,10 +623,13 @@ export default function BetTracker() {
       else if (t.kind === 'withdrawal') withdrawn += t.amount
     }
     const net = deposited - withdrawn
-    // Lifetime P&L = total portfolio (cash + open positions value) minus net
-    // money put in. Kalshi's portfolio_value is the open-positions value only,
-    // so total = cash + portfolioValue.
-    const lifetimePnl = kBalance ? (kBalance.cash + kBalance.portfolioValue) - (deposited - withdrawn) : null
+    // Open positions count toward totals only when the toggle is on; off values
+    // them at $0 (realized/cash-only view).
+    const posOf = (v) => showOpen ? (v || 0) : 0
+    // Total portfolio = cash + open positions value (Kalshi's portfolio_value
+    // is the open-positions value only). Lifetime P&L = total minus net put in.
+    const portfolioTotal = kBalance ? kBalance.cash + posOf(kBalance.portfolioValue) : null
+    const lifetimePnl = kBalance ? portfolioTotal - (deposited - withdrawn) : null
 
     // Value-based monthly P&L: change in total value between the snapshot
     // entering the month and the latest snapshot within it, minus net deposits
@@ -629,7 +641,8 @@ export default function BetTracker() {
     const monthEndCal = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`
     const today = todayISO()
     const monthEnd = monthEndCal > today ? today : monthEndCal
-    const snapTotal = (s) => s.total != null ? s.total : (s.cash + (s.positions || 0))
+    // Cash-only when open positions are toggled off (snapshots store both).
+    const snapTotal = (s) => s.cash != null ? s.cash + posOf(s.positions) : (showOpen ? (s.total || 0) : 0)
     let baseline = null, closing = null
     for (const s of balanceHistory) {
       if (s.date < monthStart && (!baseline || s.date > baseline.date)) baseline = s
@@ -646,8 +659,8 @@ export default function BetTracker() {
       monthPnlMethod = 'value'
     }
 
-    return { lifetimePnl, monthPnl, monthPnlMethod, deposited, withdrawn, net, depositCount: transfers.filter(t => t.kind === 'deposit').length, withdrawalCount: transfers.filter(t => t.kind === 'withdrawal').length }
-  }, [bets, transfers, year, month, kBalance, balanceHistory])
+    return { lifetimePnl, portfolioTotal, monthPnl, monthPnlMethod, deposited, withdrawn, net, depositCount: transfers.filter(t => t.kind === 'deposit').length, withdrawalCount: transfers.filter(t => t.kind === 'withdrawal').length }
+  }, [bets, transfers, year, month, kBalance, balanceHistory, showOpen])
 
   const hasAccount = kBalance || transfers.length > 0
 
@@ -796,11 +809,20 @@ export default function BetTracker() {
         <p>Log your bets, see daily profit and loss on a calendar, and chart your results across the month.</p>
       </div>
 
-      {/* ── Source tabs ── */}
-      <div className="ev-tabs bt-source-tabs">
-        <button className={`ev-tab${sourceTab === 'all' ? ' active' : ''}`} onClick={() => setSourceTab('all')}>All ({counts.all})</button>
-        <button className={`ev-tab${sourceTab === 'manual' ? ' active' : ''}`} onClick={() => setSourceTab('manual')}>Manual ({counts.manual})</button>
-        <button className={`ev-tab${sourceTab === 'kalshi' ? ' active' : ''}`} onClick={() => setSourceTab('kalshi')}>Kalshi ({counts.kalshi})</button>
+      {/* ── Source tabs + open-positions toggle ── */}
+      <div className="bt-controls-row">
+        <div className="ev-tabs bt-source-tabs">
+          <button className={`ev-tab${sourceTab === 'all' ? ' active' : ''}`} onClick={() => setSourceTab('all')}>All ({counts.all})</button>
+          <button className={`ev-tab${sourceTab === 'manual' ? ' active' : ''}`} onClick={() => setSourceTab('manual')}>Manual ({counts.manual})</button>
+          <button className={`ev-tab${sourceTab === 'kalshi' ? ' active' : ''}`} onClick={() => setSourceTab('kalshi')}>Kalshi ({counts.kalshi})</button>
+        </div>
+        <button
+          className={`btn btn-sm bt-open-toggle${showOpen ? ' active' : ''}`}
+          onClick={() => setShowOpen(o => !o)}
+          title="Include open (unsettled) positions in the calendar, summary, chart, and account totals"
+        >
+          {showOpen ? '◉ Open positions: On' : '○ Open positions: Off'}
+        </button>
       </div>
 
       <div className="calc-layout">
@@ -905,8 +927,11 @@ export default function BetTracker() {
               <>
                 <div className="result-grid">
                   <div className="result-item"><div className="label">Cash</div><div className="value">{kBalance ? fullMoney(kBalance.cash) : '—'}</div></div>
-                  <div className="result-item"><div className="label">Open Positions Value</div><div className="value yellow">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
-                  <div className="result-item"><div className="label">Portfolio Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.cash + kBalance.portfolioValue) : '—'}</div></div>
+                  <div className="result-item" style={!showOpen ? { opacity: 0.45 } : undefined} title={!showOpen ? 'Excluded from totals (open positions toggled off)' : undefined}>
+                    <div className="label">Open Positions Value{!showOpen ? ' (excluded)' : ''}</div>
+                    <div className="value yellow">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div>
+                  </div>
+                  <div className="result-item"><div className="label">Portfolio Value</div><div className="value blue">{account.portfolioTotal != null ? fullMoney(account.portfolioTotal) : '—'}</div></div>
                   <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl == null ? '' : account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{account.lifetimePnl == null ? '—' : fullMoney(account.lifetimePnl, true)}</div></div>
                   <div className="result-item" title={account.monthPnlMethod === 'value' ? 'Measured from your balance snapshots over the month.' : 'Estimated by summing settled Kalshi bets — accurate once balance snapshots bracket the month.'}>
                     <div className="label">P&amp;L — {MONTHS[month]}</div>
