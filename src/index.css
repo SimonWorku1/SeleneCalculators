@@ -12,6 +12,7 @@
   --accent-red: #e5484d;
   --accent-yellow: #f5b642; /* Selene amber */
   --accent-cyan: #4299ff;  /* informational / neutral highlight */
+  --accent-violet: #a78bfa; /* Discord / tertiary accent */
   --on-accent: #0a1411;    /* text on top of the green accent */
   --text: #eceef2;         /* primary text (off-white) */
   --text-muted: #8e94a3;   /* secondary text */
@@ -80,7 +81,6 @@ nav {
   display: flex;
   align-items: stretch;
   gap: 22px;
-  margin-left: auto;
   height: 100%;
 }
 
@@ -111,12 +111,106 @@ nav {
 }
 .nav-link.active .nav-ico { color: var(--accent); }
 
-/* Collapse nav to icons-only when the labelled row no longer fits one line */
-@media (max-width: 1080px) {
+/* ── Right cluster: search / Discord / avatar (mirrors Selene's nav) ── */
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex: none;
+}
+
+.nav-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 200px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface2);
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.nav-search:hover { border-color: var(--border-hi); }
+.nav-search svg { flex: none; }
+.nav-search .nav-search-ph {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-search kbd {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--border-hi);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text-3);
+  font: 600 10.5px var(--font-mono);
+}
+
+.nav-discord {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 40%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent-violet) 14%, transparent);
+  color: var(--accent-violet);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.nav-discord:hover { background: color-mix(in srgb, var(--accent-violet) 22%, transparent); }
+.nav-discord svg { flex: none; }
+
+.nav-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f472b6, var(--accent-violet));
+  color: #0a0c10;
+  font: 700 12px var(--font-sans);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+/* Collapse the decorative cluster (search/Discord) to icons first … */
+@media (max-width: 1500px) {
+  .nav-search { width: 38px; padding: 0; justify-content: center; }
+  .nav-search .nav-search-ph,
+  .nav-search kbd { display: none; }
+  .nav-discord { padding: 0 9px; }
+  .nav-discord span { display: none; }
+}
+
+/* … then the nav labels (icons-only nav) when the row no longer fits … */
+@media (max-width: 1180px) {
   header.sw-nav { gap: 16px; padding: 0 16px; }
-  nav { gap: 18px; }
+  nav { gap: 16px; }
   .nav-link span { display: none; }
   .logo .logo-tag { display: none; }
+}
+
+/* … and drop Discord entirely on the smallest screens */
+@media (max-width: 600px) {
+  .nav-right { gap: 8px; }
+  .nav-discord { display: none; }
 }
 
 /* ── Page layout ── */

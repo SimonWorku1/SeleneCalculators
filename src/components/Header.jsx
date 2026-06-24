@@ -8,6 +8,8 @@ import {
   GiftIcon,
   CalendarIcon,
   LinkIcon,
+  SearchIcon,
+  DiscordIcon,
 } from './icons.jsx'
 
 const links = [
@@ -28,11 +30,13 @@ export default function Header() {
         <span className="logo-word">SELENE</span>
         <span className="logo-tag">CALC</span>
       </NavLink>
+
       <nav>
         {links.map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}
+            title={label}
             className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
           >
             <Icon className="nav-ico" width={16} height={16} />
@@ -40,6 +44,23 @@ export default function Header() {
           </NavLink>
         ))}
       </nav>
+
+      {/* Right cluster mirrors Selene's nav. Search + Discord are placeholders
+          (no command palette / server URL wired yet); swap in real targets later. */}
+      <div className="nav-right">
+        <button className="nav-search" type="button" aria-label="Search">
+          <SearchIcon width={15} height={15} />
+          <span className="nav-search-ph">Search calculators</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <button className="nav-discord" type="button">
+          <DiscordIcon width={17} height={17} />
+          <span>Join our Discord</span>
+        </button>
+        <button className="nav-avatar" type="button" aria-label="Account">
+          SC
+        </button>
+      </div>
     </header>
   )
 }
