@@ -7,6 +7,7 @@ const KALSHI_KEYID = 'selene_kalshi_key_id'
 const KALSHI_PRIVKEY = 'selene_kalshi_private_key'
 const KALSHI_BALANCE = 'selene_kalshi_balance'
 const KALSHI_TRANSFERS = 'selene_kalshi_transfers'
+const KALSHI_BAL_HISTORY = 'selene_kalshi_balance_history'
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -178,6 +179,11 @@ export default function BetTracker() {
   const [transfers, setTransfers] = useState(() => {
     try { const a = JSON.parse(localStorage.getItem(KALSHI_TRANSFERS) || '[]'); return Array.isArray(a) ? a : [] } catch { return [] }
   })
+  // Dated total-value snapshots (one per day) so monthly P&L can be measured
+  // by value difference for periods we have history for.
+  const [balanceHistory, setBalanceHistory] = useState(() => {
+    try { const a = JSON.parse(localStorage.getItem(KALSHI_BAL_HISTORY) || '[]'); return Array.isArray(a) ? a : [] } catch { return [] }
+  })
   const [showTransfers, setShowTransfers] = useState(false)
   const [kKeyId, setKKeyId] = useState(() => { try { return localStorage.getItem(KALSHI_KEYID) || '' } catch { return '' } })
   const [kPriv, setKPriv] = useState(() => { try { return localStorage.getItem(KALSHI_PRIVKEY) || '' } catch { return '' } })
@@ -197,6 +203,9 @@ export default function BetTracker() {
   useEffect(() => {
     try { localStorage.setItem(KALSHI_TRANSFERS, JSON.stringify(transfers)) } catch { /* ignore quota */ }
   }, [transfers])
+  useEffect(() => {
+    try { localStorage.setItem(KALSHI_BAL_HISTORY, JSON.stringify(balanceHistory)) } catch { /* ignore quota */ }
+  }, [balanceHistory])
 
   /* ── add bet ── */
   function addBet(e) {
@@ -425,7 +434,18 @@ export default function BetTracker() {
       })
 
       // Account snapshot + cash-flow ledger.
-      if (data?.balance) setKBalance({ ...data.balance, syncedAt: data.syncedAt })
+      if (data?.balance) {
+        setKBalance({ ...data.balance, syncedAt: data.syncedAt })
+        // Record today's total-value snapshot (one per day; latest sync wins)
+        // to build the history monthly P&L is measured against.
+        const today = todayISO()
+        const total = data.balance.cash + data.balance.portfolioValue
+        setBalanceHistory(prev => {
+          const others = prev.filter(s => s.date !== today)
+          return [...others, { date: today, cash: data.balance.cash, positions: data.balance.portfolioValue, total }]
+            .sort((a, b) => a.date.localeCompare(b.date))
+        })
+      }
       const incomingTransfers = Array.isArray(data?.transfers) ? data.transfers : []
       if (incomingTransfers.length) {
         setTransfers(prev => {
@@ -577,15 +597,16 @@ export default function BetTracker() {
 
   // Kalshi account figures. Lifetime P&L is the true account result — total
   // portfolio (cash + open positions value) minus net money put in (deposits −
-  // withdrawals) — not a sum of synced bets, which can be incomplete. Monthly
-  // P&L is the realized (settled) Kalshi-bet P&L for the viewed month, since we
-  // have no historical balance snapshots to value-difference per month.
+  // withdrawals). Monthly P&L is measured the same value-based way *when we have
+  // balance snapshots* bracketing the month; otherwise it falls back to summing
+  // settled Kalshi bets (flagged), which can be incomplete.
   const account = useMemo(() => {
-    let monthPnl = 0
+    // Fallback: realized P&L from settled Kalshi bets in the viewed month.
+    let monthPnlBets = 0
     for (const b of bets) {
       if (b.source !== 'kalshi' || b.result === 'pending') continue
       const [y, m] = b.date.split('-').map(Number)
-      if (y === year && m === month + 1) monthPnl += betProfit(b)
+      if (y === year && m === month + 1) monthPnlBets += betProfit(b)
     }
     let deposited = 0, withdrawn = 0
     for (const t of transfers) {
@@ -597,8 +618,36 @@ export default function BetTracker() {
     // money put in. Kalshi's portfolio_value is the open-positions value only,
     // so total = cash + portfolioValue.
     const lifetimePnl = kBalance ? (kBalance.cash + kBalance.portfolioValue) - (deposited - withdrawn) : null
-    return { lifetimePnl, monthPnl, deposited, withdrawn, net, depositCount: transfers.filter(t => t.kind === 'deposit').length, withdrawalCount: transfers.filter(t => t.kind === 'withdrawal').length }
-  }, [bets, transfers, year, month, kBalance])
+
+    // Value-based monthly P&L: change in total value between the snapshot
+    // entering the month and the latest snapshot within it, minus net deposits
+    // over that exact interval. Period is anchored to real snapshot dates, so
+    // the deposit window matches the value endpoints (not the calendar edges).
+    const mm = String(month + 1).padStart(2, '0')
+    const monthStart = `${year}-${mm}-01`
+    const lastDay = new Date(year, month + 1, 0).getDate()
+    const monthEndCal = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`
+    const today = todayISO()
+    const monthEnd = monthEndCal > today ? today : monthEndCal
+    const snapTotal = (s) => s.total != null ? s.total : (s.cash + (s.positions || 0))
+    let baseline = null, closing = null
+    for (const s of balanceHistory) {
+      if (s.date < monthStart && (!baseline || s.date > baseline.date)) baseline = s
+      if (s.date <= monthEnd && (!closing || s.date > closing.date)) closing = s
+    }
+    let monthPnl = monthPnlBets
+    let monthPnlMethod = 'bets'
+    if (baseline && closing && closing.date > baseline.date) {
+      let netDur = 0
+      for (const t of transfers) {
+        if (t.date > baseline.date && t.date <= closing.date) netDur += (t.kind === 'deposit' ? t.amount : -t.amount)
+      }
+      monthPnl = (snapTotal(closing) - snapTotal(baseline)) - netDur
+      monthPnlMethod = 'value'
+    }
+
+    return { lifetimePnl, monthPnl, monthPnlMethod, deposited, withdrawn, net, depositCount: transfers.filter(t => t.kind === 'deposit').length, withdrawalCount: transfers.filter(t => t.kind === 'withdrawal').length }
+  }, [bets, transfers, year, month, kBalance, balanceHistory])
 
   const hasAccount = kBalance || transfers.length > 0
 
@@ -859,7 +908,11 @@ export default function BetTracker() {
                   <div className="result-item"><div className="label">Open Positions Value</div><div className="value yellow">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
                   <div className="result-item"><div className="label">Portfolio Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.cash + kBalance.portfolioValue) : '—'}</div></div>
                   <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl == null ? '' : account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{account.lifetimePnl == null ? '—' : fullMoney(account.lifetimePnl, true)}</div></div>
-                  <div className="result-item"><div className="label">P&amp;L — {MONTHS[month]}</div><div className={`value ${account.monthPnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.monthPnl, true)}</div></div>
+                  <div className="result-item" title={account.monthPnlMethod === 'value' ? 'Measured from your balance snapshots over the month.' : 'Estimated by summing settled Kalshi bets — accurate once balance snapshots bracket the month.'}>
+                    <div className="label">P&amp;L — {MONTHS[month]}</div>
+                    <div className={`value ${account.monthPnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.monthPnl, true)}</div>
+                    {account.monthPnlMethod === 'bets' && <div className="label" style={{ marginTop: 4, fontSize: 10, textTransform: 'none' }}>est. from bets</div>}
+                  </div>
                   <div className="result-item"><div className="label">Net Deposited</div><div className="value">{fullMoney(account.net, true)}</div></div>
                 </div>
 
