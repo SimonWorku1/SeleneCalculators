@@ -937,7 +937,7 @@ export default function BetTracker() {
 
             {kalshiConnected ? (
               <div style={{ marginTop: 16 }}>
-                <div className="info-box" style={{ borderColor: 'rgba(63,185,80,0.4)', background: 'rgba(63,185,80,0.08)', color: 'var(--accent-green)' }}>
+                <div className="info-box" style={{ borderColor: 'rgba(74,222,128,0.4)', background: 'rgba(74,222,128,0.08)', color: 'var(--accent-green)' }}>
                   ✓ Kalshi key saved.
                 </div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
@@ -1320,7 +1320,7 @@ export default function BetTracker() {
                   </select>
                 </div>
               </div>
-              {error && <div className="info-box" style={{ borderColor: 'rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.08)', color: 'var(--accent-red)' }}>{error}</div>}
+              {error && <div className="info-box" style={{ borderColor: 'rgba(229,72,77,0.4)', background: 'rgba(229,72,77,0.08)', color: 'var(--accent-red)' }}>{error}</div>}
               <button className="btn" type="submit">Add Bet</button>
             </form>
           </div>

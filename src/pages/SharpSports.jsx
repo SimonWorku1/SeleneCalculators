@@ -277,7 +277,7 @@ export default function SharpSports() {
 
             {msg && <div className="info-box" style={{ marginTop: 14 }}>{msg}</div>}
             {hasSample && (
-              <div className="info-box" style={{ marginTop: 14, borderColor: 'rgba(210,153,34,0.4)', background: 'rgba(210,153,34,0.08)' }}>
+              <div className="info-box" style={{ marginTop: 14, borderColor: 'rgba(245,182,66,0.4)', background: 'rgba(245,182,66,0.08)' }}>
                 Showing <strong>sample sandbox data</strong>, not a live sync.
               </div>
             )}
