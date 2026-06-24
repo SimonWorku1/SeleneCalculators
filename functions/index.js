@@ -281,8 +281,11 @@ function transferRecord(t, kind) {
  * stored server-side.
  */
 exports.syncKalshi = onCall({ cors: true }, async (request) => {
-  const keyId = request.data?.keyId
-  const privateKey = request.data?.privateKey
+  // Trim so stray whitespace/newlines from pasting don't end up in the
+  // KALSHI-ACCESS-KEY header — Kalshi looks up the key verbatim and a trailing
+  // space makes it report authentication_error / NOT_FOUND on a valid key.
+  const keyId = (request.data?.keyId || '').trim()
+  const privateKey = (request.data?.privateKey || '').trim()
   if (!keyId || !privateKey) {
     throw new HttpsError('invalid-argument', 'Missing Kalshi Key ID or private key.')
   }

@@ -446,7 +446,15 @@ export default function BetTracker() {
       const diagMsg = diag.length ? ` [debug — ${diag.join(' | ')}]` : ''
       setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned), ${incomingTransfers.length} transfer${incomingTransfers.length === 1 ? '' : 's'}.${errMsg}${diagMsg}`)
     } catch (e) {
-      setSyncMsg(`Kalshi sync failed: ${e.message || e}. The syncKalshi Cloud Function must be deployed first — see KALSHI_SETUP.md.`)
+      const msg = String(e?.message || e)
+      // Kalshi's "authentication_error / NOT_FOUND" means it reached Kalshi but
+      // the API Key ID isn't recognized on the production host — a key problem,
+      // not a deploy problem. Give the right guidance for each case.
+      if (/NOT_FOUND|authentication_error|401/.test(msg)) {
+        setSyncMsg(`Kalshi rejected your API key (authentication failed). The function is reaching Kalshi, but your Key ID isn't recognized. Check that: 1) the key is from Kalshi's LIVE site (kalshi.com), not the demo/sandbox; 2) you pasted the full Key ID and the entire private key (BEGIN…END lines included); 3) the key still exists under Kalshi → Profile → API Keys. Try Replace key and re-paste, or create a new key. (${msg})`)
+      } else {
+        setSyncMsg(`Kalshi sync failed: ${msg}. If this mentions the function isn't found, deploy syncKalshi first — see KALSHI_SETUP.md.`)
+      }
     } finally {
       setSyncing(false)
     }
