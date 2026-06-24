@@ -377,7 +377,7 @@ export default function BetTracker() {
     setKPriv(pk)
     setEditKalshi(false)
     setShowSecret(false)
-    setSyncMsg('Kalshi key saved on this device.')
+    setSyncMsg('Kalshi key saved.')
   }
 
   function removeKalshiKey() {
@@ -405,7 +405,6 @@ export default function BetTracker() {
       const fn = httpsCallable(functions, 'syncKalshi')
       const { data } = await fn({ keyId: kKeyId, privateKey: kPriv })
       const incoming = Array.isArray(data?.bets) ? data.bets : []
-      let added = 0
       setBets(prev => {
         // A ticker can move between pending sources across syncs — a resting
         // order fills (becomes a position), a position settles, etc. Drop any
@@ -420,7 +419,6 @@ export default function BetTracker() {
         const fresh = incoming
           .filter(b => b && b.id && !ids.has(b.id))
           .map(b => ({ ...b, source: 'kalshi' }))
-        added = fresh.length
         return [...withoutStalePending, ...fresh]
       })
 
@@ -435,16 +433,7 @@ export default function BetTracker() {
         })
       }
 
-      const diag = []
-      if (data?._rawFirstSettlement) diag.push(`settlement: ${Object.keys(data._rawFirstSettlement).join(', ')}`)
-      else if (incoming.length === 0) diag.push('no settlements returned')
-      if (data?._rawBalance) diag.push(`balance: ${Object.keys(data._rawBalance).join(', ')}`)
-      if (data?._rawFirstDeposit) diag.push(`deposit: ${Object.keys(data._rawFirstDeposit).join(', ')}`)
-      if (data?._rawFirstWithdrawal) diag.push(`withdrawal: ${Object.keys(data._rawFirstWithdrawal).join(', ')}`)
-      const acctErrs = Array.isArray(data?.accountErrors) ? data.accountErrors : []
-      const errMsg = acctErrs.length ? ` ⚠️ Account info skipped — ${acctErrs.join(' ; ')}` : ''
-      const diagMsg = diag.length ? ` [debug — ${diag.join(' | ')}]` : ''
-      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned), ${incomingTransfers.length} transfer${incomingTransfers.length === 1 ? '' : 's'}.${errMsg}${diagMsg}`)
+      setSyncMsg('Sync complete.')
     } catch (e) {
       const msg = String(e?.message || e)
       // Kalshi's "authentication_error / NOT_FOUND" means it reached Kalshi but
@@ -750,7 +739,7 @@ export default function BetTracker() {
             {kalshiConnected ? (
               <div style={{ marginTop: 16 }}>
                 <div className="info-box" style={{ borderColor: 'rgba(63,185,80,0.4)', background: 'rgba(63,185,80,0.08)', color: 'var(--accent-green)' }}>
-                  ✓ Kalshi key saved on this device (Key ID ending <strong>…{kKeyId.slice(-6)}</strong>). Your private key never leaves your browser except to sign a sync request.
+                  ✓ Kalshi key saved.
                 </div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
                   <button className="btn btn-sm bt-action-btn" onClick={syncKalshi} disabled={syncing}>{syncing ? 'Syncing…' : '🔄 Sync Kalshi bets'}</button>
@@ -796,10 +785,65 @@ export default function BetTracker() {
             )}
 
             {syncMsg && <div className="info-box" style={{ marginTop: 14 }}>{syncMsg}</div>}
+          </div>
 
-            <div className="info-box" style={{ marginTop: 14 }}>
-              Your key is stored only in this browser (localStorage). Syncing sends it once to your Firebase Cloud Function (which signs the request and is never stored there) — deploy <code>functions/syncKalshi</code> first; see <strong>KALSHI_SETUP.md</strong>. No backend yet? Use <strong>Import CSV</strong> below instead.
+          {/* ── Kalshi account: cash, portfolio, P&L, cash flow ── */}
+          <div className="card">
+            <div className="bt-month-nav">
+              <h2 style={{ margin: 0 }}>Kalshi Account</h2>
+              {kBalance?.syncedAt && (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>as of {new Date(kBalance.syncedAt).toLocaleDateString()}</span>
+              )}
             </div>
+            {!hasAccount ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 0 }}>
+                Connect your Kalshi key and hit <strong>Sync Kalshi bets</strong> to pull your cash balance, portfolio value, and deposit/withdrawal history.
+              </p>
+            ) : (
+              <>
+                <div className="result-grid">
+                  <div className="result-item"><div className="label">Cash</div><div className="value">{kBalance ? fullMoney(kBalance.cash) : '—'}</div></div>
+                  <div className="result-item"><div className="label">Portfolio (at risk)</div><div className="value yellow">{kBalance ? fullMoney(kBalance.atRisk) : '—'}</div></div>
+                  <div className="result-item"><div className="label">Account Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
+                  <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.lifetimePnl, true)}</div></div>
+                  <div className="result-item"><div className="label">P&amp;L — {MONTHS[month]}</div><div className={`value ${account.monthPnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.monthPnl, true)}</div></div>
+                  <div className="result-item"><div className="label">Net Deposited</div><div className="value">{fullMoney(account.net, true)}</div></div>
+                </div>
+
+                <div className="bt-cashflow">
+                  <div className="bt-cashflow-item"><span className="label">Deposits</span><span className="value green">{fullMoney(account.deposited)}</span><span className="sub">{account.depositCount} total</span></div>
+                  <div className="bt-cashflow-item"><span className="label">Withdrawals</span><span className="value red">{fullMoney(account.withdrawn)}</span><span className="sub">{account.withdrawalCount} total</span></div>
+                </div>
+
+                {transfers.length > 0 && (
+                  <>
+                    <button className="btn btn-outline btn-sm" style={{ width: 'auto', marginTop: 14 }} onClick={() => setShowTransfers(s => !s)}>
+                      {showTransfers ? 'Hide' : 'Show'} deposits &amp; withdrawals ({transfers.length})
+                    </button>
+                    {showTransfers && (
+                      <table className="result-table" style={{ marginTop: 12 }}>
+                        <thead>
+                          <tr><th>Date</th><th>Type</th><th>Method</th><th>Amount</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                          {transfers.map(t => (
+                            <tr key={t.id}>
+                              <td>{t.date || '—'}</td>
+                              <td><span className={`badge ${t.kind === 'deposit' ? 'badge-green' : 'badge-yellow'}`}>{t.kind === 'deposit' ? 'Deposit' : 'Withdrawal'}</span></td>
+                              <td>{t.type || '—'}</td>
+                              <td style={{ color: t.kind === 'deposit' ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 600 }}>
+                                {t.kind === 'deposit' ? '+' : '-'}{fullMoney(t.amount)}
+                              </td>
+                              <td style={{ textTransform: 'capitalize' }}>{t.status || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </>
+                )}
+              </>
+            )}
           </div>
 
           {/* ── Import / Export ── */}
@@ -866,65 +910,6 @@ export default function BetTracker() {
               <div className="result-item"><div className="label">Win Rate</div><div className="value blue">{stats.winRate === null ? '—' : `${stats.winRate.toFixed(0)}%`}</div></div>
               <div className="result-item"><div className="label">Record (W-L)</div><div className="value yellow">{stats.won}–{stats.lost}{stats.pending ? ` · ${stats.pending} open` : ''}</div></div>
             </div>
-          </div>
-
-          {/* ── Kalshi account: cash, portfolio, P&L, cash flow ── */}
-          <div className="card">
-            <div className="bt-month-nav">
-              <h2 style={{ margin: 0 }}>Kalshi Account</h2>
-              {kBalance?.syncedAt && (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>as of {new Date(kBalance.syncedAt).toLocaleDateString()}</span>
-              )}
-            </div>
-            {!hasAccount ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 0 }}>
-                Connect your Kalshi key and hit <strong>Sync Kalshi bets</strong> to pull your cash balance, portfolio value, and deposit/withdrawal history.
-              </p>
-            ) : (
-              <>
-                <div className="result-grid">
-                  <div className="result-item"><div className="label">Cash</div><div className="value">{kBalance ? fullMoney(kBalance.cash) : '—'}</div></div>
-                  <div className="result-item"><div className="label">Portfolio (at risk)</div><div className="value yellow">{kBalance ? fullMoney(kBalance.atRisk) : '—'}</div></div>
-                  <div className="result-item"><div className="label">Account Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
-                  <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.lifetimePnl, true)}</div></div>
-                  <div className="result-item"><div className="label">P&amp;L — {MONTHS[month]}</div><div className={`value ${account.monthPnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.monthPnl, true)}</div></div>
-                  <div className="result-item"><div className="label">Net Deposited</div><div className="value">{fullMoney(account.net, true)}</div></div>
-                </div>
-
-                <div className="bt-cashflow">
-                  <div className="bt-cashflow-item"><span className="label">Deposits</span><span className="value green">{fullMoney(account.deposited)}</span><span className="sub">{account.depositCount} total</span></div>
-                  <div className="bt-cashflow-item"><span className="label">Withdrawals</span><span className="value red">{fullMoney(account.withdrawn)}</span><span className="sub">{account.withdrawalCount} total</span></div>
-                </div>
-
-                {transfers.length > 0 && (
-                  <>
-                    <button className="btn btn-outline btn-sm" style={{ width: 'auto', marginTop: 14 }} onClick={() => setShowTransfers(s => !s)}>
-                      {showTransfers ? 'Hide' : 'Show'} deposits &amp; withdrawals ({transfers.length})
-                    </button>
-                    {showTransfers && (
-                      <table className="result-table" style={{ marginTop: 12 }}>
-                        <thead>
-                          <tr><th>Date</th><th>Type</th><th>Method</th><th>Amount</th><th>Status</th></tr>
-                        </thead>
-                        <tbody>
-                          {transfers.map(t => (
-                            <tr key={t.id}>
-                              <td>{t.date || '—'}</td>
-                              <td><span className={`badge ${t.kind === 'deposit' ? 'badge-green' : 'badge-yellow'}`}>{t.kind === 'deposit' ? 'Deposit' : 'Withdrawal'}</span></td>
-                              <td>{t.type || '—'}</td>
-                              <td style={{ color: t.kind === 'deposit' ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 600 }}>
-                                {t.kind === 'deposit' ? '+' : '-'}{fullMoney(t.amount)}
-                              </td>
-                              <td style={{ textTransform: 'capitalize' }}>{t.status || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </>
-                )}
-              </>
-            )}
           </div>
         </div>
       </div>
