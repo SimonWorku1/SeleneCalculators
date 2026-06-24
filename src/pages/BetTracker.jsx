@@ -441,8 +441,10 @@ export default function BetTracker() {
       if (data?._rawBalance) diag.push(`balance: ${Object.keys(data._rawBalance).join(', ')}`)
       if (data?._rawFirstDeposit) diag.push(`deposit: ${Object.keys(data._rawFirstDeposit).join(', ')}`)
       if (data?._rawFirstWithdrawal) diag.push(`withdrawal: ${Object.keys(data._rawFirstWithdrawal).join(', ')}`)
+      const acctErrs = Array.isArray(data?.accountErrors) ? data.accountErrors : []
+      const errMsg = acctErrs.length ? ` ⚠️ Account info skipped — ${acctErrs.join(' ; ')}` : ''
       const diagMsg = diag.length ? ` [debug — ${diag.join(' | ')}]` : ''
-      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned), ${incomingTransfers.length} transfer${incomingTransfers.length === 1 ? '' : 's'}.${diagMsg}`)
+      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned), ${incomingTransfers.length} transfer${incomingTransfers.length === 1 ? '' : 's'}.${errMsg}${diagMsg}`)
     } catch (e) {
       setSyncMsg(`Kalshi sync failed: ${e.message || e}. The syncKalshi Cloud Function must be deployed first — see KALSHI_SETUP.md.`)
     } finally {

@@ -62,7 +62,7 @@ async function kalshiGet(pathWithQuery, keyId, privateKey) {
   })
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`Kalshi ${res.status} ${res.statusText}: ${body.slice(0, 300)}`)
+    throw new Error(`Kalshi ${res.status} ${res.statusText} on ${pathOnly}: ${body.slice(0, 300)}`)
   }
   return res.json()
 }
@@ -324,9 +324,17 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         if (bet) bets.push(bet)
       }
     }, '&status=resting')
+  } catch (err) {
+    throw new HttpsError('internal', err.message)
+  }
 
-    // Account balance: cash available + total portfolio value (cash + market
-    // value of open positions). The at-risk amount is the difference.
+  // Account info (balance + cash flow) is a best-effort add-on: each call runs
+  // in its own try so a failure (e.g. a key without these permissions, or a
+  // renamed endpoint) is reported but never blocks the core bet sync above.
+  const accountErrors = []
+  try {
+    // Cash available + total portfolio value (cash + market value of open
+    // positions); the at-risk amount is the difference.
     const bal = await kalshiGet('/portfolio/balance', keyId, privateKey)
     rawBalance = bal
     const cash = readDollars(bal, 'balance_dollars', 'balance')
@@ -336,14 +344,20 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
       portfolioValue,
       atRisk: +Math.max(0, portfolioValue - cash).toFixed(2),
     }
-
-    // Deposit / withdrawal history for the cash-flow ledger.
+  } catch (err) {
+    accountErrors.push(`balance: ${err.message}`)
+  }
+  try {
     await paginate('/portfolio/deposits', keyId, privateKey, async (data) => {
       for (const d of data.deposits || []) {
         if (!rawFirstDeposit) rawFirstDeposit = d
         transfers.push(transferRecord(d, 'deposit'))
       }
     })
+  } catch (err) {
+    accountErrors.push(`deposits: ${err.message}`)
+  }
+  try {
     await paginate('/portfolio/withdrawals', keyId, privateKey, async (data) => {
       for (const w of data.withdrawals || []) {
         if (!rawFirstWithdrawal) rawFirstWithdrawal = w
@@ -351,7 +365,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
       }
     })
   } catch (err) {
-    throw new HttpsError('internal', err.message)
+    accountErrors.push(`withdrawals: ${err.message}`)
   }
 
   return {
@@ -359,6 +373,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     count: bets.length,
     balance,
     transfers,
+    accountErrors,
     syncedAt: new Date().toISOString(),
     _rawFirstSettlement: rawFirstSettlement,
     _rawBalance: rawBalance,
