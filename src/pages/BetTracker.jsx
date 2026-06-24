@@ -81,14 +81,15 @@ function loadBets() {
   }
 }
 
-/* ── SVG month chart (no external deps) ── */
-function MonthChart({ days, mode }) {
+/* ── SVG P&L chart (no external deps). `points` is a list of
+   { label, daily, cumulative } buckets — days, months, or year-months. ── */
+function MonthChart({ points, mode }) {
   const W = 760, H = 240, padL = 52, padR = 16, padT = 18, padB = 26
   const innerW = W - padL - padR
   const innerH = H - padT - padB
-  const n = days.length
+  const n = points.length
 
-  const vals = days.map(d => (mode === 'cumulative' ? d.cumulative : d.daily))
+  const vals = points.map(d => (mode === 'cumulative' ? d.cumulative : d.daily))
   let max = Math.max(0, ...vals)
   let min = Math.min(0, ...vals)
   if (max === min) { max += 1; min -= 1 }
@@ -102,9 +103,9 @@ function MonthChart({ days, mode }) {
   const final = vals[vals.length - 1] ?? 0
   const lineColor = final >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
 
-  // x-axis day labels (every ~5 days)
+  // x-axis labels (about 6 across, always include the last bucket)
   const step = Math.max(1, Math.round(n / 6))
-  const labels = days.filter((_, i) => i % step === 0 || i === n - 1)
+  const labels = points.map((d, i) => ({ label: d.label, i })).filter(d => d.i % step === 0 || d.i === n - 1)
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="bt-chart" preserveAspectRatio="xMidYMid meet">
@@ -118,16 +119,16 @@ function MonthChart({ days, mode }) {
       {mode === 'cumulative' ? (
         <>
           <polyline
-            points={days.map((d, i) => `${xFor(i)},${yFor(d.cumulative)}`).join(' ')}
+            points={points.map((d, i) => `${xFor(i)},${yFor(d.cumulative)}`).join(' ')}
             fill="none" stroke={lineColor} strokeWidth="2.5"
             strokeLinejoin="round" strokeLinecap="round"
           />
-          {days.map((d, i) => (
+          {points.map((d, i) => (
             <circle key={i} cx={xFor(i)} cy={yFor(d.cumulative)} r={n > 20 ? 0 : 2.5} fill={lineColor} />
           ))}
         </>
       ) : (
-        days.map((d, i) => {
+        points.map((d, i) => {
           if (d.daily === 0) return null
           const bw = Math.max(2, (innerW / n) * 0.6)
           const x = xFor(i) - bw / 2
@@ -142,7 +143,7 @@ function MonthChart({ days, mode }) {
 
       {/* x labels */}
       {labels.map((d) => (
-        <text key={d.day} x={xFor(d.day - 1)} y={H - 6} textAnchor="middle" className="bt-axis">{d.day}</text>
+        <text key={d.i} x={xFor(d.i)} y={H - 6} textAnchor="middle" className="bt-axis">{d.label}</text>
       ))}
     </svg>
   )
@@ -155,6 +156,7 @@ export default function BetTracker() {
     return { year: d.getFullYear(), month: d.getMonth() }
   })
   const [chartMode, setChartMode] = useState('cumulative')
+  const [chartRange, setChartRange] = useState('month') // month | year | all
   const [oddsFmt, setOddsFmt] = useState('american')
   const [form, setForm] = useState({
     date: todayISO(), description: '', sportsbook: '', wager: '', odds: '', result: 'pending',
@@ -494,17 +496,63 @@ export default function BetTracker() {
   }, [viewBets])
 
 
-  // chart series
-  const chartDays = useMemo(() => {
+  // chart series — buckets depend on the selected range:
+  //  month → one point per day | year → per month of `year` | all → per
+  //  year-month from the first settled bet to the last. Source-tab aware.
+  const chartSeries = useMemo(() => {
+    if (chartRange === 'month') {
+      const out = []
+      let run = 0
+      for (let d = 1; d <= daysInMonth; d++) {
+        const daily = dayPnl[d] || 0
+        run += daily
+        out.push({ label: String(d), daily, cumulative: run })
+      }
+      return out
+    }
+
+    const inTab = (b) => sourceTab === 'all' ? true : (sourceTab === 'kalshi' ? b.source === 'kalshi' : b.source !== 'kalshi')
+    const settled = bets.filter(b => inTab(b) && b.result !== 'pending')
+
+    if (chartRange === 'year') {
+      const monthly = Array(12).fill(0)
+      for (const b of settled) {
+        const [y, m] = b.date.split('-').map(Number)
+        if (y === year) monthly[m - 1] += betProfit(b)
+      }
+      const out = []
+      let run = 0
+      for (let m = 0; m < 12; m++) {
+        run += monthly[m]
+        out.push({ label: MONTHS[m].slice(0, 3), daily: monthly[m], cumulative: run })
+      }
+      return out
+    }
+
+    // all-time: bucket by YYYY-MM from earliest to latest settled bet
+    const byKey = {}
+    let minKey = null, maxKey = null
+    for (const b of settled) {
+      const key = b.date.slice(0, 7)
+      byKey[key] = (byKey[key] || 0) + betProfit(b)
+      if (!minKey || key < minKey) minKey = key
+      if (!maxKey || key > maxKey) maxKey = key
+    }
+    if (!minKey) return []
     const out = []
     let run = 0
-    for (let d = 1; d <= daysInMonth; d++) {
-      const daily = dayPnl[d] || 0
+    let [yy, mm] = minKey.split('-').map(Number)
+    const [maxY, maxM] = maxKey.split('-').map(Number)
+    while (yy < maxY || (yy === maxY && mm <= maxM)) {
+      const key = `${yy}-${String(mm).padStart(2, '0')}`
+      const daily = byKey[key] || 0
       run += daily
-      out.push({ day: d, daily, cumulative: run })
+      out.push({ label: `${MONTHS[mm - 1].slice(0, 3)} '${String(yy).slice(2)}`, daily, cumulative: run })
+      mm++
+      if (mm > 12) { mm = 1; yy++ }
     }
     return out
-  }, [dayPnl, daysInMonth])
+  }, [chartRange, dayPnl, daysInMonth, bets, sourceTab, year])
 
   // summary stats
   const stats = useMemo(() => {
@@ -525,18 +573,19 @@ export default function BetTracker() {
     }
   }, [viewBets])
 
-  const hasChartData = viewBets.some(b => b.result !== 'pending')
+  const hasChartData = chartSeries.some(p => p.daily !== 0)
 
-  // Kalshi account figures: P&L is realized (settled) Kalshi bets, lifetime and
-  // this month; transfer totals come from the synced deposit/withdrawal ledger.
+  // Kalshi account figures. Lifetime P&L is the true account result —
+  // current account value minus net money put in (portfolio value − deposits
+  // + withdrawals) — not a sum of synced bets, which can be incomplete. Monthly
+  // P&L is the realized (settled) Kalshi-bet P&L for the viewed month, since we
+  // have no historical balance snapshots to value-difference per month.
   const account = useMemo(() => {
-    let lifetimePnl = 0, monthPnl = 0
+    let monthPnl = 0
     for (const b of bets) {
       if (b.source !== 'kalshi' || b.result === 'pending') continue
-      const p = betProfit(b)
-      lifetimePnl += p
       const [y, m] = b.date.split('-').map(Number)
-      if (y === year && m === month + 1) monthPnl += p
+      if (y === year && m === month + 1) monthPnl += betProfit(b)
     }
     let deposited = 0, withdrawn = 0
     for (const t of transfers) {
@@ -544,8 +593,9 @@ export default function BetTracker() {
       else if (t.kind === 'withdrawal') withdrawn += t.amount
     }
     const net = deposited - withdrawn
+    const lifetimePnl = kBalance ? kBalance.portfolioValue - deposited + withdrawn : null
     return { lifetimePnl, monthPnl, deposited, withdrawn, net, depositCount: transfers.filter(t => t.kind === 'deposit').length, withdrawalCount: transfers.filter(t => t.kind === 'withdrawal').length }
-  }, [bets, transfers, year, month])
+  }, [bets, transfers, year, month, kBalance])
 
   const hasAccount = kBalance || transfers.length > 0
 
@@ -805,7 +855,7 @@ export default function BetTracker() {
                   <div className="result-item"><div className="label">Cash</div><div className="value">{kBalance ? fullMoney(kBalance.cash) : '—'}</div></div>
                   <div className="result-item"><div className="label">Portfolio (at risk)</div><div className="value yellow">{kBalance ? fullMoney(kBalance.atRisk) : '—'}</div></div>
                   <div className="result-item"><div className="label">Account Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
-                  <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.lifetimePnl, true)}</div></div>
+                  <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl == null ? '' : account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{account.lifetimePnl == null ? '—' : fullMoney(account.lifetimePnl, true)}</div></div>
                   <div className="result-item"><div className="label">P&amp;L — {MONTHS[month]}</div><div className={`value ${account.monthPnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.monthPnl, true)}</div></div>
                   <div className="result-item"><div className="label">Net Deposited</div><div className="value">{fullMoney(account.net, true)}</div></div>
                 </div>
@@ -916,16 +966,23 @@ export default function BetTracker() {
 
       {/* ── Chart ── */}
       <div className="card">
-        <div className="bt-month-nav">
-          <h2 style={{ margin: 0 }}>Profit / Loss — {MONTHS[month]}</h2>
-          <div className="format-toggle" style={{ margin: 0 }}>
-            <button className={`format-btn${chartMode === 'cumulative' ? ' active' : ''}`} onClick={() => setChartMode('cumulative')}>Cumulative</button>
-            <button className={`format-btn${chartMode === 'daily' ? ' active' : ''}`} onClick={() => setChartMode('daily')}>Daily</button>
+        <div className="bt-month-nav" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <h2 style={{ margin: 0 }}>Profit / Loss — {chartRange === 'month' ? `${MONTHS[month]} ${year}` : chartRange === 'year' ? year : 'All-time'}</h2>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <div className="format-toggle" style={{ margin: 0 }}>
+              <button className={`format-btn${chartRange === 'month' ? ' active' : ''}`} onClick={() => setChartRange('month')}>Month</button>
+              <button className={`format-btn${chartRange === 'year' ? ' active' : ''}`} onClick={() => setChartRange('year')}>Year</button>
+              <button className={`format-btn${chartRange === 'all' ? ' active' : ''}`} onClick={() => setChartRange('all')}>All-time</button>
+            </div>
+            <div className="format-toggle" style={{ margin: 0 }}>
+              <button className={`format-btn${chartMode === 'cumulative' ? ' active' : ''}`} onClick={() => setChartMode('cumulative')}>Cumulative</button>
+              <button className={`format-btn${chartMode === 'daily' ? ' active' : ''}`} onClick={() => setChartMode('daily')}>{chartRange === 'month' ? 'Daily' : 'Per month'}</button>
+            </div>
           </div>
         </div>
         {hasChartData
-          ? <MonthChart days={chartDays} mode={chartMode} />
-          : <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No settled bets this month yet. Add bets and mark them won or lost to see your P&amp;L curve.</p>}
+          ? <MonthChart points={chartSeries} mode={chartMode} />
+          : <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No settled bets in this {chartRange === 'month' ? 'month' : chartRange === 'year' ? 'year' : 'range'} yet. Mark bets won or lost to see your P&amp;L curve.</p>}
       </div>
 
       {/* ── Bet list (full width, chronological) ── */}
