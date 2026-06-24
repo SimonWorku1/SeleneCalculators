@@ -950,6 +950,17 @@ input[type=number] { -moz-appearance: textfield; }
   font-size: 11px;
 }
 
+.bt-tip-val {
+  font-size: 14px;
+  font-weight: 700;
+}
+.bt-tip-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
+.bt-chart { cursor: crosshair; }
+
 .bt-del {
   background: none;
   border: none;

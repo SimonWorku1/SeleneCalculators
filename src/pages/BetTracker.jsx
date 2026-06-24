@@ -83,13 +83,35 @@ function loadBets() {
   }
 }
 
+// Catmull-Rom spline → cubic bezier path. Passes through every point but
+// curves smoothly between them (so hovered values stay exact), à la Pikkit.
+function smoothPath(pts) {
+  if (pts.length < 2) return pts.length === 1 ? `M ${pts[0].x} ${pts[0].y}` : ''
+  let d = `M ${pts[0].x} ${pts[0].y}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[i + 2] || p2
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.y + (p2.y - p0.y) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.y - (p3.y - p1.y) / 6
+    d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+  }
+  return d
+}
+
 /* ── SVG P&L chart (no external deps). `points` is a list of
-   { label, daily, cumulative } buckets — days, months, or year-months. ── */
+   { label, daily, cumulative } buckets — days, months, or year-months.
+   Hover (or drag) anywhere to read the P&L at that point. ── */
 function MonthChart({ points, mode }) {
-  const W = 760, H = 240, padL = 52, padR = 16, padT = 18, padB = 26
+  const W = 760, H = 240, padL = 22, padR = 22, padT = 22, padB = 26
   const innerW = W - padL - padR
   const innerH = H - padT - padB
   const n = points.length
+  const svgRef = useRef(null)
+  const [hover, setHover] = useState(null)
 
   const vals = points.map(d => (mode === 'cumulative' ? d.cumulative : d.daily))
   let max = Math.max(0, ...vals)
@@ -105,29 +127,61 @@ function MonthChart({ points, mode }) {
   const final = vals[vals.length - 1] ?? 0
   const lineColor = final >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
 
+  const linePts = points.map((d, i) => ({ x: xFor(i), y: yFor(d.cumulative) }))
+  const pathD = smoothPath(linePts)
+  const areaD = pathD ? `${pathD} L ${xFor(n - 1)} ${zeroY} L ${xFor(0)} ${zeroY} Z` : ''
+
   // x-axis labels (about 6 across, always include the last bucket)
   const step = Math.max(1, Math.round(n / 6))
   const labels = points.map((d, i) => ({ label: d.label, i })).filter(d => d.i % step === 0 || d.i === n - 1)
 
+  function pickFromClientX(clientX) {
+    const svg = svgRef.current
+    if (!svg) return
+    const rect = svg.getBoundingClientRect()
+    const vbX = (clientX - rect.left) / rect.width * W
+    let i = Math.round((vbX - padL) / innerW * (n - 1))
+    i = Math.max(0, Math.min(n - 1, i))
+    setHover(i)
+  }
+
+  const hv = hover != null ? points[hover] : null
+  const hoverVal = hv ? (mode === 'cumulative' ? hv.cumulative : hv.daily) : 0
+  const hoverX = hv ? xFor(hover) : 0
+  const hoverY = hv ? yFor(hoverVal) : 0
+  // Tooltip box, clamped within the plot width.
+  const tipW = 132, tipH = 40
+  const tipX = Math.max(padL, Math.min(W - padR - tipW, hoverX - tipW / 2))
+  const tipY = Math.max(2, hoverY - tipH - 12)
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="bt-chart" preserveAspectRatio="xMidYMid meet">
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${W} ${H}`}
+      className="bt-chart"
+      preserveAspectRatio="xMidYMid meet"
+      style={{ touchAction: 'none' }}
+      onMouseMove={e => pickFromClientX(e.clientX)}
+      onMouseLeave={() => setHover(null)}
+      onTouchStart={e => pickFromClientX(e.touches[0].clientX)}
+      onTouchMove={e => pickFromClientX(e.touches[0].clientX)}
+      onTouchEnd={() => setHover(null)}
+    >
+      <defs>
+        <linearGradient id="bt-area-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={lineColor} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
       {/* zero baseline */}
       <line x1={padL} y1={zeroY} x2={W - padR} y2={zeroY} stroke="var(--border)" strokeWidth="1" />
-      {/* y labels */}
-      <text x={padL - 8} y={yFor(max) + 4} textAnchor="end" className="bt-axis">{money(max)}</text>
-      <text x={padL - 8} y={zeroY + 4} textAnchor="end" className="bt-axis">$0</text>
-      <text x={padL - 8} y={yFor(min) + 4} textAnchor="end" className="bt-axis">{money(min)}</text>
 
       {mode === 'cumulative' ? (
         <>
-          <polyline
-            points={points.map((d, i) => `${xFor(i)},${yFor(d.cumulative)}`).join(' ')}
-            fill="none" stroke={lineColor} strokeWidth="2.5"
-            strokeLinejoin="round" strokeLinecap="round"
-          />
-          {points.map((d, i) => (
-            <circle key={i} cx={xFor(i)} cy={yFor(d.cumulative)} r={n > 20 ? 0 : 2.5} fill={lineColor} />
-          ))}
+          {areaD && <path d={areaD} fill="url(#bt-area-grad)" stroke="none" />}
+          <path d={pathD} fill="none" stroke={lineColor} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+          {n === 1 && <circle cx={xFor(0)} cy={yFor(points[0].cumulative)} r={3} fill={lineColor} />}
         </>
       ) : (
         points.map((d, i) => {
@@ -138,7 +192,7 @@ function MonthChart({ points, mode }) {
           const h = Math.abs(yFor(d.daily) - zeroY)
           return (
             <rect key={i} x={x} y={y} width={bw} height={h} rx="1"
-              fill={d.daily >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'} />
+              fill={d.daily >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'} opacity={hover != null && hover !== i ? 0.5 : 1} />
           )
         })
       )}
@@ -147,6 +201,17 @@ function MonthChart({ points, mode }) {
       {labels.map((d) => (
         <text key={d.i} x={xFor(d.i)} y={H - 6} textAnchor="middle" className="bt-axis">{d.label}</text>
       ))}
+
+      {/* hover guide + marker + tooltip */}
+      {hv && (
+        <g pointerEvents="none">
+          <line x1={hoverX} y1={padT} x2={hoverX} y2={H - padB} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
+          {mode === 'cumulative' && <circle cx={hoverX} cy={hoverY} r={4.5} fill={lineColor} stroke="var(--surface)" strokeWidth="1.5" />}
+          <rect x={tipX} y={tipY} width={tipW} height={tipH} rx="6" fill="var(--surface2)" stroke="var(--border)" strokeWidth="1" />
+          <text x={tipX + tipW / 2} y={tipY + 17} textAnchor="middle" className="bt-tip-val" fill={hoverVal >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}>{fullMoney(hoverVal, true)}</text>
+          <text x={tipX + tipW / 2} y={tipY + 32} textAnchor="middle" className="bt-tip-label">{hv.label}</text>
+        </g>
+      )}
     </svg>
   )
 }
