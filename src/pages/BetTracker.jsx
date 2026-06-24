@@ -102,16 +102,28 @@ function smoothPath(pts) {
   return d
 }
 
+// Catmull-Rom interpolation of a value array at fractional index i+u (u in
+// [0,1]). Matches the spline the line is drawn with, so a hovered point sits
+// exactly on the curve and reads the value the line shows there.
+function crValue(arr, i, u) {
+  const p0 = arr[i - 1] ?? arr[i]
+  const p1 = arr[i]
+  const p2 = arr[i + 1] ?? arr[i]
+  const p3 = arr[i + 2] ?? p2
+  const u2 = u * u, u3 = u2 * u
+  return 0.5 * ((2 * p1) + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3)
+}
+
 /* ── SVG P&L chart (no external deps). `points` is a list of
    { label, daily, cumulative } buckets — days, months, or year-months.
    Hover (or drag) anywhere to read the P&L at that point. ── */
 function MonthChart({ points, mode }) {
-  const W = 760, H = 240, padL = 22, padR = 22, padT = 22, padB = 26
+  const W = 760, H = 240, padL = 22, padR = 22, padT = 22, padB = 14
   const innerW = W - padL - padR
   const innerH = H - padT - padB
   const n = points.length
   const svgRef = useRef(null)
-  const [hover, setHover] = useState(null)
+  const [hover, setHover] = useState(null) // { x, y, value, label, idx } | null
 
   const vals = points.map(d => (mode === 'cumulative' ? d.cumulative : d.daily))
   let max = Math.max(0, ...vals)
@@ -127,32 +139,35 @@ function MonthChart({ points, mode }) {
   const final = vals[vals.length - 1] ?? 0
   const lineColor = final >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
 
+  const cumArr = points.map(d => d.cumulative)
   const linePts = points.map((d, i) => ({ x: xFor(i), y: yFor(d.cumulative) }))
   const pathD = smoothPath(linePts)
   const areaD = pathD ? `${pathD} L ${xFor(n - 1)} ${zeroY} L ${xFor(0)} ${zeroY} Z` : ''
 
-  // x-axis labels (about 6 across, always include the last bucket)
-  const step = Math.max(1, Math.round(n / 6))
-  const labels = points.map((d, i) => ({ label: d.label, i })).filter(d => d.i % step === 0 || d.i === n - 1)
-
   function pickFromClientX(clientX) {
     const svg = svgRef.current
-    if (!svg) return
+    if (!svg || n === 0) return
     const rect = svg.getBoundingClientRect()
     const vbX = (clientX - rect.left) / rect.width * W
-    let i = Math.round((vbX - padL) / innerW * (n - 1))
-    i = Math.max(0, Math.min(n - 1, i))
-    setHover(i)
+    // Continuous fractional index along the line, so the marker glides smoothly
+    // between data points instead of snapping to the nearest one.
+    const gt = Math.max(0, Math.min(n - 1, (vbX - padL) / innerW * (n - 1)))
+    const i0 = Math.floor(gt)
+    const u = gt - i0
+    const x = xFor(gt)
+    if (mode === 'cumulative') {
+      const value = crValue(cumArr, i0, u)
+      setHover({ x, y: yFor(value), value, label: points[Math.round(gt)].label, idx: Math.round(gt) })
+    } else {
+      const i = Math.round(gt)
+      setHover({ x: xFor(i), y: yFor(points[i].daily), value: points[i].daily, label: points[i].label, idx: i })
+    }
   }
 
-  const hv = hover != null ? points[hover] : null
-  const hoverVal = hv ? (mode === 'cumulative' ? hv.cumulative : hv.daily) : 0
-  const hoverX = hv ? xFor(hover) : 0
-  const hoverY = hv ? yFor(hoverVal) : 0
   // Tooltip box, clamped within the plot width.
   const tipW = 132, tipH = 40
-  const tipX = Math.max(padL, Math.min(W - padR - tipW, hoverX - tipW / 2))
-  const tipY = Math.max(2, hoverY - tipH - 12)
+  const tipX = hover ? Math.max(padL, Math.min(W - padR - tipW, hover.x - tipW / 2)) : 0
+  const tipY = hover ? Math.max(2, hover.y - tipH - 12) : 0
 
   return (
     <svg
@@ -192,24 +207,19 @@ function MonthChart({ points, mode }) {
           const h = Math.abs(yFor(d.daily) - zeroY)
           return (
             <rect key={i} x={x} y={y} width={bw} height={h} rx="1"
-              fill={d.daily >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'} opacity={hover != null && hover !== i ? 0.5 : 1} />
+              fill={d.daily >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'} opacity={hover && hover.idx !== i ? 0.5 : 1} />
           )
         })
       )}
 
-      {/* x labels */}
-      {labels.map((d) => (
-        <text key={d.i} x={xFor(d.i)} y={H - 6} textAnchor="middle" className="bt-axis">{d.label}</text>
-      ))}
-
       {/* hover guide + marker + tooltip */}
-      {hv && (
+      {hover && (
         <g pointerEvents="none">
-          <line x1={hoverX} y1={padT} x2={hoverX} y2={H - padB} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
-          {mode === 'cumulative' && <circle cx={hoverX} cy={hoverY} r={4.5} fill={lineColor} stroke="var(--surface)" strokeWidth="1.5" />}
+          <line x1={hover.x} y1={padT} x2={hover.x} y2={H - padB} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
+          {mode === 'cumulative' && <circle cx={hover.x} cy={hover.y} r={4.5} fill={lineColor} stroke="var(--surface)" strokeWidth="1.5" />}
           <rect x={tipX} y={tipY} width={tipW} height={tipH} rx="6" fill="var(--surface2)" stroke="var(--border)" strokeWidth="1" />
-          <text x={tipX + tipW / 2} y={tipY + 17} textAnchor="middle" className="bt-tip-val" fill={hoverVal >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}>{fullMoney(hoverVal, true)}</text>
-          <text x={tipX + tipW / 2} y={tipY + 32} textAnchor="middle" className="bt-tip-label">{hv.label}</text>
+          <text x={tipX + tipW / 2} y={tipY + 17} textAnchor="middle" className="bt-tip-val" fill={hover.value >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}>{fullMoney(hover.value, true)}</text>
+          <text x={tipX + tipW / 2} y={tipY + 32} textAnchor="middle" className="bt-tip-label">{hover.label}</text>
         </g>
       )}
     </svg>
