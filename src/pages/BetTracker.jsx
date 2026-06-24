@@ -575,9 +575,9 @@ export default function BetTracker() {
 
   const hasChartData = chartSeries.some(p => p.daily !== 0)
 
-  // Kalshi account figures. Lifetime P&L is the true account result —
-  // current account value minus net money put in (portfolio value − deposits
-  // + withdrawals) — not a sum of synced bets, which can be incomplete. Monthly
+  // Kalshi account figures. Lifetime P&L is the true account result — total
+  // portfolio (cash + open positions value) minus net money put in (deposits −
+  // withdrawals) — not a sum of synced bets, which can be incomplete. Monthly
   // P&L is the realized (settled) Kalshi-bet P&L for the viewed month, since we
   // have no historical balance snapshots to value-difference per month.
   const account = useMemo(() => {
@@ -593,7 +593,10 @@ export default function BetTracker() {
       else if (t.kind === 'withdrawal') withdrawn += t.amount
     }
     const net = deposited - withdrawn
-    const lifetimePnl = kBalance ? kBalance.portfolioValue - deposited + withdrawn : null
+    // Lifetime P&L = total portfolio (cash + open positions value) minus net
+    // money put in. Kalshi's portfolio_value is the open-positions value only,
+    // so total = cash + portfolioValue.
+    const lifetimePnl = kBalance ? (kBalance.cash + kBalance.portfolioValue) - (deposited - withdrawn) : null
     return { lifetimePnl, monthPnl, deposited, withdrawn, net, depositCount: transfers.filter(t => t.kind === 'deposit').length, withdrawalCount: transfers.filter(t => t.kind === 'withdrawal').length }
   }, [bets, transfers, year, month, kBalance])
 
@@ -853,8 +856,8 @@ export default function BetTracker() {
               <>
                 <div className="result-grid">
                   <div className="result-item"><div className="label">Cash</div><div className="value">{kBalance ? fullMoney(kBalance.cash) : '—'}</div></div>
-                  <div className="result-item"><div className="label">Portfolio (at risk)</div><div className="value yellow">{kBalance ? fullMoney(kBalance.atRisk) : '—'}</div></div>
-                  <div className="result-item"><div className="label">Account Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
+                  <div className="result-item"><div className="label">Open Positions Value</div><div className="value yellow">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
+                  <div className="result-item"><div className="label">Portfolio Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.cash + kBalance.portfolioValue) : '—'}</div></div>
                   <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl == null ? '' : account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{account.lifetimePnl == null ? '—' : fullMoney(account.lifetimePnl, true)}</div></div>
                   <div className="result-item"><div className="label">P&amp;L — {MONTHS[month]}</div><div className={`value ${account.monthPnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.monthPnl, true)}</div></div>
                   <div className="result-item"><div className="label">Net Deposited</div><div className="value">{fullMoney(account.net, true)}</div></div>
