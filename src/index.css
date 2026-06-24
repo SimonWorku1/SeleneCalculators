@@ -975,6 +975,39 @@ input[type=number] { -moz-appearance: textfield; }
 .bt-calendar.bt-compact .bt-day-pnl { font-size: 12px; }
 .bt-calendar.bt-compact .bt-day-count { font-size: 9px; }
 
+/* ── Bet Tracker: Kalshi account cash flow ── */
+.bt-cashflow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+.bt-cashflow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.bt-cashflow-item .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.bt-cashflow-item .value {
+  font-size: 18px;
+  font-weight: 700;
+}
+.bt-cashflow-item .value.green { color: var(--accent-green); }
+.bt-cashflow-item .value.red { color: var(--accent-red); }
+.bt-cashflow-item .sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* ── Bet Tracker: add actions + modal ── */
 .bt-add-actions {
   display: flex;

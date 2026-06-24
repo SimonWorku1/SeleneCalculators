@@ -237,6 +237,42 @@ async function orderToBet(o, marketCache) {
 }
 
 /**
+ * Read a dollar amount that Kalshi may expose either as a fixed-point dollar
+ * string (`*_dollars`) or a legacy integer-cents field (`*_cents` / bare). The
+ * dollar fields are exact; the cent fields truncate sub-cent values. Prefer
+ * dollars, fall back to cents/100.
+ */
+function readDollars(obj, ...keys) {
+  for (const k of keys) {
+    if (obj[k] == null) continue
+    if (k.endsWith('_dollars')) return parseFloat(obj[k]) || 0
+    return (parseFloat(obj[k]) || 0) / 100 // *_cents or legacy cents
+  }
+  return 0
+}
+
+/**
+ * Map one Kalshi deposit or withdrawal to a transfer record for the tracker's
+ * ledger. `kind` is 'deposit' | 'withdrawal'. Field names are best-effort
+ * (Kalshi docs gate scraping) — we read the most likely names with fallbacks,
+ * and the sync also returns one raw object so exact names can be confirmed.
+ */
+function transferRecord(t, kind) {
+  const amount = readDollars(t, 'amount_dollars', 'amount_cents', 'amount')
+  const fee = readDollars(t, 'fee_dollars', 'fee_cents', 'fee')
+  const ts = t.created_ts || t.created_time || t.finalized_ts || t.updated_ts || ''
+  return {
+    id: `kalshi-${kind}-${t.deposit_id || t.withdrawal_id || t.transfer_id || t.id || ts}`,
+    kind,
+    date: String(ts).slice(0, 10),
+    amount: +amount.toFixed(2),
+    fee: +fee.toFixed(2),
+    status: t.status || '',
+    type: t.type || t.payment_method || '',
+  }
+}
+
+/**
  * Callable function. From the app:
  *   const sync = httpsCallable(getFunctions(), 'syncKalshi')
  *   const { data } = await sync({ keyId, privateKey })  // -> { bets, count }
@@ -252,7 +288,13 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   }
 
   const bets = []
-  let rawFirstSettlement = null  // returned for diagnostics; remove once field names are confirmed
+  const transfers = []
+  let balance = null
+  // Raw samples returned for diagnostics; remove once field names are confirmed.
+  let rawFirstSettlement = null
+  let rawBalance = null
+  let rawFirstDeposit = null
+  let rawFirstWithdrawal = null
   // Caches GetMarket lookups by ticker for the life of this sync call, since
   // the same market often appears across settlements/positions/orders.
   const marketCache = new Map()
@@ -282,6 +324,32 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         if (bet) bets.push(bet)
       }
     }, '&status=resting')
+
+    // Account balance: cash available + total portfolio value (cash + market
+    // value of open positions). The at-risk amount is the difference.
+    const bal = await kalshiGet('/portfolio/balance', keyId, privateKey)
+    rawBalance = bal
+    const cash = readDollars(bal, 'balance_dollars', 'balance')
+    const portfolioValue = readDollars(bal, 'portfolio_value_dollars', 'portfolio_value') || cash
+    balance = {
+      cash,
+      portfolioValue,
+      atRisk: +Math.max(0, portfolioValue - cash).toFixed(2),
+    }
+
+    // Deposit / withdrawal history for the cash-flow ledger.
+    await paginate('/portfolio/deposits', keyId, privateKey, async (data) => {
+      for (const d of data.deposits || []) {
+        if (!rawFirstDeposit) rawFirstDeposit = d
+        transfers.push(transferRecord(d, 'deposit'))
+      }
+    })
+    await paginate('/portfolio/withdrawals', keyId, privateKey, async (data) => {
+      for (const w of data.withdrawals || []) {
+        if (!rawFirstWithdrawal) rawFirstWithdrawal = w
+        transfers.push(transferRecord(w, 'withdrawal'))
+      }
+    })
   } catch (err) {
     throw new HttpsError('internal', err.message)
   }
@@ -289,8 +357,13 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   return {
     bets,
     count: bets.length,
+    balance,
+    transfers,
     syncedAt: new Date().toISOString(),
     _rawFirstSettlement: rawFirstSettlement,
+    _rawBalance: rawBalance,
+    _rawFirstDeposit: rawFirstDeposit,
+    _rawFirstWithdrawal: rawFirstWithdrawal,
   }
 })
 

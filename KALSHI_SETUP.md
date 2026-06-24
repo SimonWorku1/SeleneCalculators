@@ -63,12 +63,16 @@ firebase deploy --only functions
 ```
 
 That deploys the callable **`syncKalshi`** function. It accepts
-`{ keyId, privateKey }`, signs the requests, and calls three Kalshi
+`{ keyId, privateKey }`, signs the requests, and calls several Kalshi
 endpoints — `/portfolio/settlements` (resolved bets), `/portfolio/positions`
 (filled but not-yet-settled bets), and `/portfolio/orders?status=resting`
 (placed but not-yet-filled bets) — returning all of them normalized into bets,
-with anything not yet settled tagged `result: 'pending'`. **No secrets to
-configure**, because the key comes from the client at call time.
+with anything not yet settled tagged `result: 'pending'`. It also pulls
+`/portfolio/balance` (cash + total portfolio value) and
+`/portfolio/deposits` + `/portfolio/withdrawals` (cash-flow history), which
+feed the **Kalshi Account** card (cash, portfolio at-risk, lifetime/monthly
+P&L, and the deposit/withdrawal ledger). **No secrets to configure**, because
+the key comes from the client at call time.
 
 ---
 

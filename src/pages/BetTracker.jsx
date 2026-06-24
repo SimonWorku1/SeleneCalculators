@@ -5,6 +5,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 const STORAGE_KEY = 'selene_bets'
 const KALSHI_KEYID = 'selene_kalshi_key_id'
 const KALSHI_PRIVKEY = 'selene_kalshi_private_key'
+const KALSHI_BALANCE = 'selene_kalshi_balance'
+const KALSHI_TRANSFERS = 'selene_kalshi_transfers'
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -32,6 +34,14 @@ const todayISO = () => {
 }
 
 const money = (n) => (n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`)
+
+// Exact dollars with comma grouping, for account/cash-flow figures where you
+// want the real number ($1,234.56), not a compact approximation. `signed`
+// prefixes + / - (for P&L); otherwise just the magnitude.
+function fullMoney(n, signed = false) {
+  const sign = n < 0 ? '-' : signed ? '+' : ''
+  return sign + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 // Suffixes for each power of 1000: thousand, million, billion, trillion,
 // quadrillion, quintillion, sextillion, septillion, octillion, nonillion,
@@ -159,6 +169,14 @@ export default function BetTracker() {
   const [dayModal, setDayModal] = useState(null) // day number (in current view month) or null
   const [syncing, setSyncing] = useState(false)
   const [sourceTab, setSourceTab] = useState('all') // all | manual | kalshi
+  // Kalshi account snapshot + cash-flow ledger from the last sync.
+  const [kBalance, setKBalance] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(KALSHI_BALANCE) || 'null') } catch { return null }
+  })
+  const [transfers, setTransfers] = useState(() => {
+    try { const a = JSON.parse(localStorage.getItem(KALSHI_TRANSFERS) || '[]'); return Array.isArray(a) ? a : [] } catch { return [] }
+  })
+  const [showTransfers, setShowTransfers] = useState(false)
   const [kKeyId, setKKeyId] = useState(() => { try { return localStorage.getItem(KALSHI_KEYID) || '' } catch { return '' } })
   const [kPriv, setKPriv] = useState(() => { try { return localStorage.getItem(KALSHI_PRIVKEY) || '' } catch { return '' } })
   const [editKalshi, setEditKalshi] = useState(() => { try { return !localStorage.getItem(KALSHI_KEYID) } catch { return true } })
@@ -171,6 +189,12 @@ export default function BetTracker() {
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(bets)) } catch { /* ignore quota */ }
   }, [bets])
+  useEffect(() => {
+    try { localStorage.setItem(KALSHI_BALANCE, JSON.stringify(kBalance)) } catch { /* ignore quota */ }
+  }, [kBalance])
+  useEffect(() => {
+    try { localStorage.setItem(KALSHI_TRANSFERS, JSON.stringify(transfers)) } catch { /* ignore quota */ }
+  }, [transfers])
 
   /* ── add bet ── */
   function addBet(e) {
@@ -399,10 +423,26 @@ export default function BetTracker() {
         added = fresh.length
         return [...withoutStalePending, ...fresh]
       })
-      const diagMsg = data?._rawFirstSettlement
-        ? ` [debug fields: ${Object.keys(data._rawFirstSettlement).join(', ')}]`
-        : incoming.length === 0 ? ' [no settlements returned by Kalshi]' : ''
-      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned).${diagMsg}`)
+
+      // Account snapshot + cash-flow ledger.
+      if (data?.balance) setKBalance({ ...data.balance, syncedAt: data.syncedAt })
+      const incomingTransfers = Array.isArray(data?.transfers) ? data.transfers : []
+      if (incomingTransfers.length) {
+        setTransfers(prev => {
+          const byId = new Map(prev.map(t => [t.id, t]))
+          for (const t of incomingTransfers) byId.set(t.id, t) // fresh status wins
+          return [...byId.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+        })
+      }
+
+      const diag = []
+      if (data?._rawFirstSettlement) diag.push(`settlement: ${Object.keys(data._rawFirstSettlement).join(', ')}`)
+      else if (incoming.length === 0) diag.push('no settlements returned')
+      if (data?._rawBalance) diag.push(`balance: ${Object.keys(data._rawBalance).join(', ')}`)
+      if (data?._rawFirstDeposit) diag.push(`deposit: ${Object.keys(data._rawFirstDeposit).join(', ')}`)
+      if (data?._rawFirstWithdrawal) diag.push(`withdrawal: ${Object.keys(data._rawFirstWithdrawal).join(', ')}`)
+      const diagMsg = diag.length ? ` [debug — ${diag.join(' | ')}]` : ''
+      setSyncMsg(`Kalshi sync complete — ${added} new bet${added === 1 ? '' : 's'} imported (${incoming.length} returned), ${incomingTransfers.length} transfer${incomingTransfers.length === 1 ? '' : 's'}.${diagMsg}`)
     } catch (e) {
       setSyncMsg(`Kalshi sync failed: ${e.message || e}. The syncKalshi Cloud Function must be deployed first — see KALSHI_SETUP.md.`)
     } finally {
@@ -487,6 +527,28 @@ export default function BetTracker() {
   }, [viewBets])
 
   const hasChartData = viewBets.some(b => b.result !== 'pending')
+
+  // Kalshi account figures: P&L is realized (settled) Kalshi bets, lifetime and
+  // this month; transfer totals come from the synced deposit/withdrawal ledger.
+  const account = useMemo(() => {
+    let lifetimePnl = 0, monthPnl = 0
+    for (const b of bets) {
+      if (b.source !== 'kalshi' || b.result === 'pending') continue
+      const p = betProfit(b)
+      lifetimePnl += p
+      const [y, m] = b.date.split('-').map(Number)
+      if (y === year && m === month + 1) monthPnl += p
+    }
+    let deposited = 0, withdrawn = 0
+    for (const t of transfers) {
+      if (t.kind === 'deposit') deposited += t.amount
+      else if (t.kind === 'withdrawal') withdrawn += t.amount
+    }
+    const net = deposited - withdrawn
+    return { lifetimePnl, monthPnl, deposited, withdrawn, net, depositCount: transfers.filter(t => t.kind === 'deposit').length, withdrawalCount: transfers.filter(t => t.kind === 'withdrawal').length }
+  }, [bets, transfers, year, month])
+
+  const hasAccount = kBalance || transfers.length > 0
 
   // bets on the day currently open in the day-detail modal, newest first
   const modalBets = useMemo(() => {
@@ -794,6 +856,65 @@ export default function BetTracker() {
               <div className="result-item"><div className="label">Win Rate</div><div className="value blue">{stats.winRate === null ? '—' : `${stats.winRate.toFixed(0)}%`}</div></div>
               <div className="result-item"><div className="label">Record (W-L)</div><div className="value yellow">{stats.won}–{stats.lost}{stats.pending ? ` · ${stats.pending} open` : ''}</div></div>
             </div>
+          </div>
+
+          {/* ── Kalshi account: cash, portfolio, P&L, cash flow ── */}
+          <div className="card">
+            <div className="bt-month-nav">
+              <h2 style={{ margin: 0 }}>Kalshi Account</h2>
+              {kBalance?.syncedAt && (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>as of {new Date(kBalance.syncedAt).toLocaleDateString()}</span>
+              )}
+            </div>
+            {!hasAccount ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 0 }}>
+                Connect your Kalshi key and hit <strong>Sync Kalshi bets</strong> to pull your cash balance, portfolio value, and deposit/withdrawal history.
+              </p>
+            ) : (
+              <>
+                <div className="result-grid">
+                  <div className="result-item"><div className="label">Cash</div><div className="value">{kBalance ? fullMoney(kBalance.cash) : '—'}</div></div>
+                  <div className="result-item"><div className="label">Portfolio (at risk)</div><div className="value yellow">{kBalance ? fullMoney(kBalance.atRisk) : '—'}</div></div>
+                  <div className="result-item"><div className="label">Account Value</div><div className="value blue">{kBalance ? fullMoney(kBalance.portfolioValue) : '—'}</div></div>
+                  <div className="result-item"><div className="label">P&amp;L — Lifetime</div><div className={`value ${account.lifetimePnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.lifetimePnl, true)}</div></div>
+                  <div className="result-item"><div className="label">P&amp;L — {MONTHS[month]}</div><div className={`value ${account.monthPnl >= 0 ? 'green' : 'red'}`}>{fullMoney(account.monthPnl, true)}</div></div>
+                  <div className="result-item"><div className="label">Net Deposited</div><div className="value">{fullMoney(account.net, true)}</div></div>
+                </div>
+
+                <div className="bt-cashflow">
+                  <div className="bt-cashflow-item"><span className="label">Deposits</span><span className="value green">{fullMoney(account.deposited)}</span><span className="sub">{account.depositCount} total</span></div>
+                  <div className="bt-cashflow-item"><span className="label">Withdrawals</span><span className="value red">{fullMoney(account.withdrawn)}</span><span className="sub">{account.withdrawalCount} total</span></div>
+                </div>
+
+                {transfers.length > 0 && (
+                  <>
+                    <button className="btn btn-outline btn-sm" style={{ width: 'auto', marginTop: 14 }} onClick={() => setShowTransfers(s => !s)}>
+                      {showTransfers ? 'Hide' : 'Show'} deposits &amp; withdrawals ({transfers.length})
+                    </button>
+                    {showTransfers && (
+                      <table className="result-table" style={{ marginTop: 12 }}>
+                        <thead>
+                          <tr><th>Date</th><th>Type</th><th>Method</th><th>Amount</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                          {transfers.map(t => (
+                            <tr key={t.id}>
+                              <td>{t.date || '—'}</td>
+                              <td><span className={`badge ${t.kind === 'deposit' ? 'badge-green' : 'badge-yellow'}`}>{t.kind === 'deposit' ? 'Deposit' : 'Withdrawal'}</span></td>
+                              <td>{t.type || '—'}</td>
+                              <td style={{ color: t.kind === 'deposit' ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 600 }}>
+                                {t.kind === 'deposit' ? '+' : '-'}{fullMoney(t.amount)}
+                              </td>
+                              <td style={{ textTransform: 'capitalize' }}>{t.status || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
