@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { BeakerIcon } from '../components/icons.jsx'
 
 function InfoTip({ text }) {
   return (
@@ -146,6 +147,7 @@ export default function Devigger() {
   return (
     <div className="page">
       <div className="page-header">
+        <div className="eyebrow"><BeakerIcon />Devigger</div>
         <h1>Devigger</h1>
         <p>Remove the bookmaker's margin to find true no-vig probabilities and fair odds.</p>
       </div>

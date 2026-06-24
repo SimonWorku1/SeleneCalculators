@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { CalendarIcon } from '../components/icons.jsx'
 // Firebase is imported lazily inside syncKalshi() so the localStorage-only
 // tracker loads without the Firebase SDK (and without it installed).
 
@@ -880,6 +881,7 @@ export default function BetTracker() {
   return (
     <div className="page wide">
       <div className="page-header">
+        <div className="eyebrow"><CalendarIcon />Bet Tracker</div>
         <h1>Bet Tracker</h1>
         <p>Log your bets, see daily profit and loss on a calendar, and chart your results across the month.</p>
       </div>

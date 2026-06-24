@@ -1,17 +1,44 @@
 import { NavLink } from 'react-router-dom'
+import {
+  MoonIcon,
+  ScaleIcon,
+  ChartIcon,
+  BeakerIcon,
+  TrendingUpIcon,
+  GiftIcon,
+  CalendarIcon,
+  LinkIcon,
+} from './icons.jsx'
+
+const links = [
+  { to: '/arbitrage', label: 'Arbitrage', Icon: ScaleIcon },
+  { to: '/prediction-markets', label: 'Prediction Markets', Icon: ChartIcon },
+  { to: '/devigger', label: 'Devigger', Icon: BeakerIcon },
+  { to: '/ev-calculator', label: 'Expected Value', Icon: TrendingUpIcon },
+  { to: '/bonus-bet', label: 'Bonus Bet', Icon: GiftIcon },
+  { to: '/bet-tracker', label: 'Bet Tracker', Icon: CalendarIcon },
+  { to: '/sharpsports', label: 'SharpSports', Icon: LinkIcon },
+]
 
 export default function Header() {
   return (
-    <header>
-      <NavLink to="/" className="logo">Selene<span>Calc</span></NavLink>
+    <header className="sw-nav">
+      <NavLink to="/" className="logo" end>
+        <MoonIcon className="logo-moon" width={20} height={20} />
+        <span className="logo-word">SELENE</span>
+        <span className="logo-tag">CALC</span>
+      </NavLink>
       <nav>
-        <NavLink to="/arbitrage" className={({ isActive }) => isActive ? 'active' : ''}>Arbitrage</NavLink>
-        <NavLink to="/prediction-markets" className={({ isActive }) => isActive ? 'active' : ''}>Prediction Markets</NavLink>
-        <NavLink to="/devigger" className={({ isActive }) => isActive ? 'active' : ''}>Devigger</NavLink>
-        <NavLink to="/ev-calculator" className={({ isActive }) => isActive ? 'active' : ''}>Expected Value</NavLink>
-        <NavLink to="/bonus-bet" className={({ isActive }) => isActive ? 'active' : ''}>Bonus Bet</NavLink>
-        <NavLink to="/bet-tracker" className={({ isActive }) => isActive ? 'active' : ''}>Bet Tracker</NavLink>
-        <NavLink to="/sharpsports" className={({ isActive }) => isActive ? 'active' : ''}>SharpSports</NavLink>
+        {links.map(({ to, label, Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+          >
+            <Icon className="nav-ico" width={16} height={16} />
+            <span>{label}</span>
+          </NavLink>
+        ))}
       </nav>
     </header>
   )

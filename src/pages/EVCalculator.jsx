@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { TrendingUpIcon } from '../components/icons.jsx'
 
 function toDecimal(val, fmt) {
   const n = parseFloat(val)
@@ -45,6 +46,7 @@ export default function EVCalculator() {
   return (
     <div className="page">
       <div className="page-header">
+        <div className="eyebrow"><TrendingUpIcon />Expected Value</div>
         <h1>Expected Value (EV) Calculator</h1>
         <p>Calculate the expected value of any bet given your estimated true win probability and the offered odds.</p>
       </div>

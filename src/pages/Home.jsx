@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom'
+import { MoonIcon } from '../components/icons.jsx'
 
 export default function Home() {
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header hero">
+        <div className="eyebrow"><MoonIcon />Selene Calculators</div>
         <h1>Betting Calculators</h1>
         <p>Professional-grade tools for sports bettors. Find arbitrage opportunities, remove the vig, convert odds, and calculate expected value.</p>
       </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { GiftIcon } from '../components/icons.jsx'
 
 function toDecimal(val, fmt) {
   const n = parseFloat(val)
@@ -54,6 +55,7 @@ export default function BonusBet() {
   return (
     <div className="page">
       <div className="page-header">
+        <div className="eyebrow"><GiftIcon />Bonus Bet</div>
         <h1>Bonus Bet Converter</h1>
         <p>Calculate the optimal hedge to convert a bonus or free bet into guaranteed cash.</p>
       </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChartIcon } from '../components/icons.jsx'
 
 function probToAmerican(p) {
   if (p >= 0.5) return -(p / (1 - p)) * 100
@@ -88,6 +89,7 @@ export default function PredictionMarkets() {
   return (
     <div className="page">
       <div className="page-header">
+        <div className="eyebrow"><ChartIcon />Prediction Markets</div>
         <h1>Prediction Markets Converter</h1>
         <p>Enter any value to convert — all fields update together.</p>
       </div>

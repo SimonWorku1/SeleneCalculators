@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { LinkIcon } from '../components/icons.jsx'
 // Firebase is imported lazily inside the sync/connect handlers so the page
 // loads without the Firebase SDK on the critical path (same pattern as the
 // Bet Tracker's Kalshi sync).
@@ -240,6 +241,7 @@ export default function SharpSports() {
   return (
     <div className="page wide">
       <div className="page-header">
+        <div className="eyebrow"><LinkIcon />SharpSports</div>
         <h1>SharpSports Sync</h1>
         <p>Link a sportsbook through SharpSports BetSync (sandbox) and pull your bet slips into a monthly P&amp;L calendar and a detailed bet list.</p>
       </div>

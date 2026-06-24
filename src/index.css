@@ -5,7 +5,8 @@
   --bg: #0b0d12;            /* page background (near-black) */
   --surface: #14171f;      /* elevated card */
   --surface2: #1a1e27;     /* hover / higher elevation */
-  --border: #2a2f3d;       /* borders / dividers */
+  --border: #1f2330;       /* hairline borders / dividers (Selene base) */
+  --border-hi: #2a2f3d;    /* stronger border on hover / emphasis */
   --accent: #4ade80;       /* Selene green — primary / brand / interactive */
   --accent-green: #4ade80; /* positive / profit */
   --accent-red: #e5484d;
@@ -14,7 +15,9 @@
   --on-accent: #0a1411;    /* text on top of the green accent */
   --text: #eceef2;         /* primary text (off-white) */
   --text-muted: #8e94a3;   /* secondary text */
+  --text-3: #5a5f6e;       /* tertiary — muted icons + micro labels */
   --radius: 8px;
+  --radius-lg: 14px;       /* cards / panels */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, SFMono-Regular, Menlo,
@@ -32,50 +35,89 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Header ── */
-header {
+/* ── Header / top nav (Selene) ── */
+header.sw-nav {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   padding: 0 24px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 60px;
+  gap: 28px;
+  height: 64px;
   position: sticky;
   top: 0;
   z-index: 100;
 }
 
 .logo {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   text-decoration: none;
-  letter-spacing: -0.5px;
+  flex: none;
 }
 
-.logo span { color: var(--text); }
+.logo .logo-moon { color: var(--accent); }
+
+.logo .logo-word {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+}
+
+.logo .logo-tag {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 5px;
+}
 
 nav {
   display: flex;
-  gap: 4px;
+  align-items: stretch;
+  gap: 22px;
+  margin-left: auto;
+  height: 100%;
 }
 
-nav a {
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 100%;
+  padding: 0 2px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
   color: var(--text-muted);
   text-decoration: none;
-  padding: 6px 14px;
-  border-radius: var(--radius);
-  font-size: 14px;
-  transition: all 0.15s;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
 }
 
-nav a:hover, nav a.active {
-  background: var(--surface2);
+.nav-link .nav-ico { color: var(--text-3); transition: color 0.15s; }
+
+.nav-link:hover { color: var(--text); }
+.nav-link:hover .nav-ico { color: var(--text-muted); }
+
+.nav-link.active {
   color: var(--text);
+  border-bottom-color: var(--accent);
 }
+.nav-link.active .nav-ico { color: var(--accent); }
 
-nav a.active { color: var(--accent); }
+/* Collapse nav to icons-only when the labelled row no longer fits one line */
+@media (max-width: 1080px) {
+  header.sw-nav { gap: 16px; padding: 0 16px; }
+  nav { gap: 18px; }
+  .nav-link span { display: none; }
+  .logo .logo-tag { display: none; }
+}
 
 /* ── Page layout ── */
 .page {
@@ -103,32 +145,58 @@ nav a.active { color: var(--accent); }
 }
 
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 30px;
 }
 
+.page-header .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 11px;
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.page-header .eyebrow svg { width: 15px; height: 15px; }
+
 .page-header h1 {
-  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
-  font-style: italic;
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  margin-bottom: 6px;
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 8px;
 }
 
 .page-header p {
   color: var(--text-muted);
   font-size: 14px;
-  max-width: 560px;
+  max-width: 600px;
+}
+
+/* Home landing keeps the Playfair display accent on its hero title */
+.page-header.hero h1 {
+  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 600;
+  font-size: 34px;
+  letter-spacing: 0.01em;
 }
 
 /* ── Cards ── */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 24px;
   margin-bottom: 20px;
+  transition: border-color 0.2s;
 }
+
+.card:hover { border-color: var(--border-hi); }
 
 .card h2 {
   font-size: 15px;
@@ -374,7 +442,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 .calc-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 24px;
   text-decoration: none;
   color: var(--text);
@@ -454,7 +522,7 @@ input[type=number] { -moz-appearance: textfield; }
 .arb-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: 20px;
 }

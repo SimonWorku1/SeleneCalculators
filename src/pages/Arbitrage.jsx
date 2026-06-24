@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { ScaleIcon } from '../components/icons.jsx'
 
 function toDecimal(val, format) {
   const n = parseFloat(val)
@@ -80,6 +81,7 @@ export default function Arbitrage() {
   return (
     <div className="page">
       <div className="page-header">
+        <div className="eyebrow"><ScaleIcon />Arbitrage</div>
         <h1>Arbitrage Calculator</h1>
         <p>Enter odds and stakes for each outcome to detect guaranteed profit opportunities and calculate optimal wager amounts.</p>
       </div>
