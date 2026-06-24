@@ -610,7 +610,7 @@ export default function BetTracker() {
       for (let d = 1; d <= daysInMonth; d++) {
         const daily = dayPnl[d] || 0
         run += daily
-        out.push({ label: String(d), daily, cumulative: run })
+        out.push({ label: `${MONTHS[month].slice(0, 3)} ${d}`, daily, cumulative: run })
       }
       return out
     }
