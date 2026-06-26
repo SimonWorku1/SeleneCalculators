@@ -122,11 +122,16 @@ function americanFromDecimal(dec) {
  * Kalshi contracts settle at $1.00 (100¢); your average fill price in cents
  * is the implied probability, so decimal odds = 100 / avgPriceCents.
  *
- * Kalshi migrated portfolio responses to fixed-point / dollar fields
- * (`yes_count_fp`, `yes_total_cost_dollars`, `revenue_dollars`) and the legacy
- * cent-integer fields (`yes_count`, `yes_total_cost`, `revenue`) get truncated
- * or dropped on fractional-enabled markets — which made every settled bet map
- * to null here. We read the new fields first and fall back to the old ones.
+ * Revenue / payout field pitfall: Kalshi's `revenue_dollars` returns 0 for
+ * NO-side wins (the field tracks YES-side settlement payouts only). To get the
+ * correct P&L for NO bets, we must fall back to computing the payout from the
+ * settlement/final price (0 = NO won → each NO contract pays $1.00; 100 = YES
+ * won → each YES contract pays $1.00). We try all known field name variants
+ * before resorting to first-principles, so future API renames are handled too.
+ *
+ * Returns null (and is included in _rawZeroRevenueSample in the response) when
+ * revenue could not be determined — that raw object helps identify field names
+ * if Kalshi changes them again.
  */
 async function settlementToBet(s, marketCache) {
   const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
@@ -134,14 +139,49 @@ async function settlementToBet(s, marketCache) {
   const contracts = yesCount + noCount
 
   // Cost basis in dollars: prefer the *_dollars fields, else convert legacy cents.
-  const costDollars =
-    s.yes_total_cost_dollars != null || s.no_total_cost_dollars != null
-      ? parseFloat(s.yes_total_cost_dollars || 0) + parseFloat(s.no_total_cost_dollars || 0)
-      : ((s.yes_total_cost || 0) + (s.no_total_cost || 0)) / 100
+  const yesCostDollars = s.yes_total_cost_dollars != null
+    ? parseFloat(s.yes_total_cost_dollars || 0)
+    : (s.yes_total_cost || 0) / 100
+  const noCostDollars = s.no_total_cost_dollars != null
+    ? parseFloat(s.no_total_cost_dollars || 0)
+    : (s.no_total_cost || 0) / 100
+  const costDollars = yesCostDollars + noCostDollars
   if (contracts <= 0 || costDollars <= 0) return null
 
-  // Payout in dollars: prefer revenue_dollars, else convert legacy cents.
-  const revenueDollars = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : (s.revenue || 0) / 100
+  // Gross revenue (total cash received at settlement, not just profit).
+  // Try all known field variants, then compute from first principles.
+  let revenueDollars = null
+
+  // 1. Combined revenue field (preferred new API shape)
+  if (s.revenue_dollars != null) revenueDollars = parseFloat(s.revenue_dollars)
+  // 2. Separate YES + NO revenue fields (alternative new API shape)
+  else if (s.yes_revenue_dollars != null || s.no_revenue_dollars != null)
+    revenueDollars = parseFloat(s.yes_revenue_dollars || 0) + parseFloat(s.no_revenue_dollars || 0)
+  // 3. Fixed-point revenue string
+  else if (s.revenue_fp != null) revenueDollars = parseFloat(s.revenue_fp)
+  // 4. Legacy integer cents
+  else if (s.revenue != null) revenueDollars = s.revenue / 100
+
+  // 5. If revenue is 0 or missing, compute from settlement price.
+  //    Binary Kalshi contracts: YES pays $1 each if YES wins (price → 100¢),
+  //    NO pays $1 each if NO wins (price → 0¢).
+  if (!revenueDollars) {
+    // Try every field name Kalshi has used for the resolution price (0 or 100 cents).
+    const priceCents =
+      s.final_price ?? s.settlement_price ?? s.result_price ??
+      s.yes_ask ?? s.last_price ?? null
+    const p = priceCents != null ? parseFloat(priceCents) : null
+    if (p === 100) {
+      revenueDollars = yesCount          // YES won: YES contracts pay $1 each
+    } else if (p === 0) {
+      revenueDollars = noCount           // NO won: NO contracts pay $1 each
+    }
+    // If neither, revenueDollars stays null — bet will be excluded and the raw
+    // object is captured in _rawZeroRevenueSample for field-name diagnosis.
+  }
+
+  if (revenueDollars == null) return { _unknownRevenue: true, _raw: s }
+
   const pnlDollars = revenueDollars - costDollars
   const avgPriceCents = (costDollars * 100) / contracts // 1..99
   const dec = 100 / avgPriceCents
@@ -295,6 +335,9 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   let balance = null
   // Raw samples returned for diagnostics; remove once field names are confirmed.
   let rawFirstSettlement = null
+  // First settlement where revenue could not be determined — shows the exact
+  // Kalshi field names in this response so the revenue lookup can be updated.
+  let rawZeroRevenueSample = null
   let rawBalance = null
   let rawFirstDeposit = null
   let rawFirstWithdrawal = null
@@ -305,8 +348,14 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     await paginate('/portfolio/settlements', keyId, privateKey, async (data) => {
       for (const s of data.settlements || []) {
         if (!rawFirstSettlement) rawFirstSettlement = s
-        const bet = await settlementToBet(s, marketCache)
-        if (bet) bets.push(bet)
+        const result = await settlementToBet(s, marketCache)
+        // settlementToBet returns { _unknownRevenue, _raw } when revenue fields
+        // can't be determined — capture the raw object and skip the bet.
+        if (result?._unknownRevenue) {
+          if (!rawZeroRevenueSample) rawZeroRevenueSample = result._raw
+        } else if (result) {
+          bets.push(result)
+        }
       }
     })
     // Open (not yet settled) positions, so a filled bet shows up as
@@ -379,6 +428,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     accountErrors,
     syncedAt: new Date().toISOString(),
     _rawFirstSettlement: rawFirstSettlement,
+    _rawZeroRevenueSample: rawZeroRevenueSample,
     _rawBalance: rawBalance,
     _rawFirstDeposit: rawFirstDeposit,
     _rawFirstWithdrawal: rawFirstWithdrawal,

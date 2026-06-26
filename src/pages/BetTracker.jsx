@@ -551,7 +551,14 @@ export default function BetTracker() {
         })
       }
 
-      setSyncMsg('Sync complete.')
+      // If some settlements had unrecognized revenue fields, log the raw object
+      // so the exact Kalshi field names can be identified and added to the mapper.
+      if (data?._rawZeroRevenueSample) {
+        console.warn('[Kalshi] Settlement with unresolved revenue — raw object:', data._rawZeroRevenueSample)
+        console.warn('[Kalshi] First settlement sample:', data._rawFirstSettlement)
+      }
+      const unknownCount = (Array.isArray(data?.bets) ? 0 : 0) // placeholder — server filters these out
+      setSyncMsg('Sync complete.' + (data?._rawZeroRevenueSample ? ' ⚠ Some bets had unknown revenue fields — check browser console for raw data.' : ''))
     } catch (e) {
       const msg = String(e?.message || e)
       // Kalshi's "authentication_error / NOT_FOUND" means it reached Kalshi but
