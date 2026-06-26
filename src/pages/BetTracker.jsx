@@ -487,6 +487,17 @@ export default function BetTracker() {
     setSyncMsg('Kalshi key removed.')
   }
 
+<<<<<<< HEAD
+=======
+  function clearKalshiBets() {
+    const kalshiCount = bets.filter(b => b.source === 'kalshi').length
+    if (!kalshiCount) { setSyncMsg('No Kalshi bets to clear.'); return }
+    if (!window.confirm(`Remove all ${kalshiCount} Kalshi-synced bets? They'll be re-imported on the next sync.`)) return
+    setBets(prev => prev.filter(b => b.source !== 'kalshi'))
+    setSyncMsg(`Cleared ${kalshiCount} Kalshi bets. Sync again to re-import.`)
+  }
+
+>>>>>>> 3730e3e (Fix stale Kalshi bets overriding fresh sync data; add Clear Kalshi bets button)
   /* ── Kalshi sync (key signed server-side via Firebase Cloud Function) ── */
   async function syncKalshi() {
     if (!kKeyId || !kPriv) { setSyncMsg('Save your Kalshi key first.'); return }
@@ -506,6 +517,7 @@ export default function BetTracker() {
         // old pending placeholder for a ticker this sync touched at all, so
         // it gets replaced by the fresh picture instead of lingering as a
         // duplicate alongside it.
+<<<<<<< HEAD
         const touchedTickers = new Set(incoming.filter(b => b.ticker).map(b => b.ticker))
         const withoutStalePending = prev.filter(
           b => !(b.source === 'kalshi' && b.result === 'pending' && touchedTickers.has(b.ticker))
@@ -515,6 +527,21 @@ export default function BetTracker() {
           .filter(b => b && b.id && !ids.has(b.id))
           .map(b => ({ ...b, source: 'kalshi' }))
         return [...withoutStalePending, ...fresh]
+=======
+        // Also drop any existing bet whose id appears in the fresh sync data —
+        // the server's data always wins, which clears stale records left over
+        // from earlier syncs that used a different field mapping.
+        const touchedTickers = new Set(incoming.filter(b => b.ticker).map(b => b.ticker))
+        const incomingIds = new Set(incoming.filter(b => b?.id).map(b => b.id))
+        const withoutStale = prev.filter(
+          b => !(b.source === 'kalshi' && b.result === 'pending' && touchedTickers.has(b.ticker))
+               && !incomingIds.has(b.id)
+        )
+        const fresh = incoming
+          .filter(b => b && b.id)
+          .map(b => ({ ...b, source: 'kalshi' }))
+        return [...withoutStale, ...fresh]
+>>>>>>> 3730e3e (Fix stale Kalshi bets overriding fresh sync data; add Clear Kalshi bets button)
       })
 
       // Account snapshot + cash-flow ledger.
@@ -939,13 +966,21 @@ export default function BetTracker() {
 
             {kalshiConnected ? (
               <div style={{ marginTop: 16 }}>
+<<<<<<< HEAD
                 <div className="info-box" style={{ borderColor: 'rgba(74,222,128,0.4)', background: 'rgba(74,222,128,0.08)', color: 'var(--accent-green)' }}>
+=======
+                <div className="info-box" style={{ borderColor: 'rgba(63,185,80,0.4)', background: 'rgba(63,185,80,0.08)', color: 'var(--accent-green)' }}>
+>>>>>>> 3730e3e (Fix stale Kalshi bets overriding fresh sync data; add Clear Kalshi bets button)
                   ✓ Kalshi key saved.
                 </div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
                   <button className="btn btn-sm bt-action-btn" onClick={syncKalshi} disabled={syncing}>{syncing ? 'Syncing…' : '🔄 Sync Kalshi bets'}</button>
                   <button className="btn btn-outline btn-sm" onClick={() => { setShowSecret(false); setEditKalshi(true) }}>Replace key</button>
                   <button className="btn btn-outline btn-sm" onClick={removeKalshiKey}>Remove key</button>
+<<<<<<< HEAD
+=======
+                  <button className="btn btn-outline btn-sm" onClick={clearKalshiBets}>Clear Kalshi bets</button>
+>>>>>>> 3730e3e (Fix stale Kalshi bets overriding fresh sync data; add Clear Kalshi bets button)
                 </div>
               </div>
             ) : (
@@ -1322,7 +1357,11 @@ export default function BetTracker() {
                   </select>
                 </div>
               </div>
+<<<<<<< HEAD
               {error && <div className="info-box" style={{ borderColor: 'rgba(229,72,77,0.4)', background: 'rgba(229,72,77,0.08)', color: 'var(--accent-red)' }}>{error}</div>}
+=======
+              {error && <div className="info-box" style={{ borderColor: 'rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.08)', color: 'var(--accent-red)' }}>{error}</div>}
+>>>>>>> 3730e3e (Fix stale Kalshi bets overriding fresh sync data; add Clear Kalshi bets button)
               <button className="btn" type="submit">Add Bet</button>
             </form>
           </div>
