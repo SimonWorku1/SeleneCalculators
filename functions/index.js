@@ -122,23 +122,22 @@ function americanFromDecimal(dec) {
  * Kalshi contracts settle at $1.00 (100¢); your average fill price in cents
  * is the implied probability, so decimal odds = 100 / avgPriceCents.
  *
- * Revenue / payout field pitfall: Kalshi's `revenue_dollars` returns 0 for
- * NO-side wins (the field tracks YES-side settlement payouts only). To get the
- * correct P&L for NO bets, we must fall back to computing the payout from the
- * settlement/final price (0 = NO won → each NO contract pays $1.00; 100 = YES
- * won → each YES contract pays $1.00). We try all known field name variants
- * before resorting to first-principles, so future API renames are handled too.
+ * Revenue / payout field pitfall: Kalshi's `revenue_dollars` is 0 for NO-side
+ * wins (it only tracks YES-side settlement payouts). The reliable fix is to
+ * read the market's `result` field ('yes' or 'no') from the GetMarket response
+ * we already fetch for every ticker, then compute payout from first principles:
+ *   YES won → revenue = yes_count_fp × $1.00
+ *   NO  won → revenue = no_count_fp  × $1.00
  *
- * Returns null (and is included in _rawZeroRevenueSample in the response) when
- * revenue could not be determined — that raw object helps identify field names
- * if Kalshi changes them again.
+ * We still try every known revenue field first so a future API fix is picked
+ * up automatically. A _rawZeroRevenueSample is returned in the sync response
+ * whenever revenue cannot be resolved, for field-name diagnosis.
  */
 async function settlementToBet(s, marketCache) {
   const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
   const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
   const contracts = yesCount + noCount
 
-  // Cost basis in dollars: prefer the *_dollars fields, else convert legacy cents.
   const yesCostDollars = s.yes_total_cost_dollars != null
     ? parseFloat(s.yes_total_cost_dollars || 0)
     : (s.yes_total_cost || 0) / 100
@@ -148,13 +147,15 @@ async function settlementToBet(s, marketCache) {
   const costDollars = yesCostDollars + noCostDollars
   if (contracts <= 0 || costDollars <= 0) return null
 
-  // Gross revenue (total cash received at settlement, not just profit).
-  // Try all known field variants, then compute from first principles.
-  let revenueDollars = null
+  // Fetch market info now — needed for both description AND settlement result.
+  const side = yesCount >= noCount ? 'YES' : 'NO'
+  const market = await getMarketInfo(s.ticker, marketCache)
 
-  // 1. Combined revenue field (preferred new API shape)
+  // ── Revenue resolution (gross payout, not net profit) ──────────────────
+  // 1. Explicit combined revenue field (new API)
+  let revenueDollars = null
   if (s.revenue_dollars != null) revenueDollars = parseFloat(s.revenue_dollars)
-  // 2. Separate YES + NO revenue fields (alternative new API shape)
+  // 2. Separate YES + NO revenue fields
   else if (s.yes_revenue_dollars != null || s.no_revenue_dollars != null)
     revenueDollars = parseFloat(s.yes_revenue_dollars || 0) + parseFloat(s.no_revenue_dollars || 0)
   // 3. Fixed-point revenue string
@@ -162,32 +163,34 @@ async function settlementToBet(s, marketCache) {
   // 4. Legacy integer cents
   else if (s.revenue != null) revenueDollars = s.revenue / 100
 
-  // 5. If revenue is 0 or missing, compute from settlement price.
-  //    Binary Kalshi contracts: YES pays $1 each if YES wins (price → 100¢),
-  //    NO pays $1 each if NO wins (price → 0¢).
+  // 5. revenue_dollars is 0 for NO-side wins — fall back to market result.
+  //    GetMarket returns `result: 'yes' | 'no'` for finalized markets.
+  //    Binary contracts pay $1.00 per contract to the winning side.
   if (!revenueDollars) {
-    // Try every field name Kalshi has used for the resolution price (0 or 100 cents).
-    const priceCents =
-      s.final_price ?? s.settlement_price ?? s.result_price ??
-      s.yes_ask ?? s.last_price ?? null
-    const p = priceCents != null ? parseFloat(priceCents) : null
-    if (p === 100) {
-      revenueDollars = yesCount          // YES won: YES contracts pay $1 each
-    } else if (p === 0) {
-      revenueDollars = noCount           // NO won: NO contracts pay $1 each
+    const marketResult = market?.result ?? market?.market_result ?? null
+    if (marketResult === 'yes') {
+      revenueDollars = yesCount   // YES won: each YES contract pays $1
+    } else if (marketResult === 'no') {
+      revenueDollars = noCount    // NO won: each NO contract pays $1
     }
-    // If neither, revenueDollars stays null — bet will be excluded and the raw
-    // object is captured in _rawZeroRevenueSample for field-name diagnosis.
   }
 
+  // 6. Last resort: settlement price fields on the settlement record itself.
+  if (!revenueDollars) {
+    const priceCents =
+      s.final_price ?? s.settlement_price ?? s.result_price ?? s.last_price ?? null
+    const p = priceCents != null ? parseFloat(priceCents) : null
+    if (p === 100) revenueDollars = yesCount
+    else if (p === 0) revenueDollars = noCount
+  }
+
+  // Still unknown — exclude and flag for diagnosis.
   if (revenueDollars == null) return { _unknownRevenue: true, _raw: s }
 
   const pnlDollars = revenueDollars - costDollars
   const avgPriceCents = (costDollars * 100) / contracts // 1..99
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
-  const side = yesCount >= noCount ? 'YES' : 'NO'
-  const market = await getMarketInfo(s.ticker, marketCache)
 
   return {
     id: `kalshi-${s.ticker}-${s.settled_time}`,
