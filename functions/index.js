@@ -123,15 +123,20 @@ function americanFromDecimal(dec) {
  * is the implied probability, so decimal odds = 100 / avgPriceCents.
  *
  * Revenue / payout field pitfall: Kalshi's `revenue_dollars` is 0 for NO-side
- * wins (it only tracks YES-side settlement payouts). The reliable fix is to
- * read the market's `result` field ('yes' or 'no') from the GetMarket response
- * we already fetch for every ticker, then compute payout from first principles:
- *   YES won → revenue = yes_count_fp × $1.00
- *   NO  won → revenue = no_count_fp  × $1.00
+ * wins AND for all losses — it only tracks YES-side payouts. So `revenue_dollars
+ * = 0` is ambiguous: it could mean the bet lost OR that the user bet NO and won.
+ * We resolve this by determining WHICH SIDE WON first, then computing the payout
+ * from first principles (winning side × $1/contract). Signals tried in order:
+ *   1. Settlement record's own result field (s.result / s.market_result / etc.)
+ *   2. GetMarket response `result` field ('yes' | 'no')
+ *   3. Market's last_price proxy (settled to ≤5¢ = NO won, ≥95¢ = YES won)
+ *   4. revenue_dollars > 0 → YES won (reliable positive signal for YES side)
+ *   5. Settlement-level price fields (final_price, settlement_price, etc.)
+ *   6. YES-side bet + revenue_dollars = 0 → YES lost (safe for YES-only positions)
  *
- * We still try every known revenue field first so a future API fix is picked
- * up automatically. A _rawZeroRevenueSample is returned in the sync response
- * whenever revenue cannot be resolved, for field-name diagnosis.
+ * NO-side bets with no determinable outcome are excluded and returned as
+ * `_unknownRevenue` with both the raw settlement AND the raw market object so
+ * the exact Kalshi field names can be diagnosed from the browser console.
  */
 async function settlementToBet(s, marketCache) {
   const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
@@ -147,48 +152,73 @@ async function settlementToBet(s, marketCache) {
   const costDollars = yesCostDollars + noCostDollars
   if (contracts <= 0 || costDollars <= 0) return null
 
-  // Fetch market info now — needed for both description AND settlement result.
   const side = yesCount >= noCount ? 'YES' : 'NO'
   const market = await getMarketInfo(s.ticker, marketCache)
 
-  // ── Revenue resolution (gross payout, not net profit) ──────────────────
-  // 1. Explicit combined revenue field (new API)
-  let revenueDollars = null
-  if (s.revenue_dollars != null) revenueDollars = parseFloat(s.revenue_dollars)
-  // 2. Separate YES + NO revenue fields
-  else if (s.yes_revenue_dollars != null || s.no_revenue_dollars != null)
-    revenueDollars = parseFloat(s.yes_revenue_dollars || 0) + parseFloat(s.no_revenue_dollars || 0)
-  // 3. Fixed-point revenue string
-  else if (s.revenue_fp != null) revenueDollars = parseFloat(s.revenue_fp)
-  // 4. Legacy integer cents
-  else if (s.revenue != null) revenueDollars = s.revenue / 100
+  // ── Determine which side won ──────────────────────────────────────────────
+  let winner = null // 'yes' | 'no'
 
-  // 5. revenue_dollars is 0 for NO-side wins — fall back to market result.
-  //    GetMarket returns `result: 'yes' | 'no'` for finalized markets.
-  //    Binary contracts pay $1.00 per contract to the winning side.
-  if (!revenueDollars) {
-    const marketResult = market?.result ?? market?.market_result ?? null
-    if (marketResult === 'yes') {
-      revenueDollars = yesCount   // YES won: each YES contract pays $1
-    } else if (marketResult === 'no') {
-      revenueDollars = noCount    // NO won: each NO contract pays $1
+  // 1. Settlement record's own result field (multiple possible field names)
+  const sResult = s.result ?? s.market_result ?? s.settlement_result ?? null
+  if (sResult === 'yes' || sResult === 1 || sResult === true) winner = 'yes'
+  else if (sResult === 'no' || sResult === 0 || sResult === false) winner = 'no'
+
+  // 2. GetMarket result field
+  if (!winner) {
+    const mResult = market?.result ?? market?.market_result ?? null
+    if (mResult === 'yes') winner = 'yes'
+    else if (mResult === 'no') winner = 'no'
+  }
+
+  // 3. Market's last_price: settled markets trade to ≤5¢ (NO won) or ≥95¢ (YES won)
+  if (!winner && market?.last_price != null) {
+    const lp = parseFloat(market.last_price)
+    if (lp >= 95) winner = 'yes'
+    else if (lp <= 5) winner = 'no'
+  }
+
+  // 4. revenue_dollars > 0 is a reliable YES-win signal (Kalshi populates it only for YES payouts)
+  let revenueDollarsFromApi = null
+  if (!winner) {
+    const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
+    if (rd != null && rd > 0) {
+      revenueDollarsFromApi = rd; winner = 'yes'
+    } else if ((s.yes_revenue_dollars ?? s.no_revenue_dollars) != null) {
+      const combined = parseFloat(s.yes_revenue_dollars || 0) + parseFloat(s.no_revenue_dollars || 0)
+      if (combined > 0) { revenueDollarsFromApi = combined; winner = 'yes' }
+    } else if (s.revenue_fp != null && parseFloat(s.revenue_fp) > 0) {
+      revenueDollarsFromApi = parseFloat(s.revenue_fp); winner = 'yes'
+    } else if (s.revenue != null && s.revenue > 0) {
+      revenueDollarsFromApi = s.revenue / 100; winner = 'yes'
     }
   }
 
-  // 6. Last resort: settlement price fields on the settlement record itself.
-  if (!revenueDollars) {
-    const priceCents =
-      s.final_price ?? s.settlement_price ?? s.result_price ?? s.last_price ?? null
-    const p = priceCents != null ? parseFloat(priceCents) : null
-    if (p === 100) revenueDollars = yesCount
-    else if (p === 0) revenueDollars = noCount
+  // 5. Settlement-level price fields
+  if (!winner) {
+    const sp = s.final_price ?? s.settlement_price ?? s.result_price ?? null
+    const p = sp != null ? parseFloat(sp) : null
+    if (p !== null) {
+      if (p >= 95) winner = 'yes'
+      else if (p <= 5) winner = 'no'
+    }
   }
 
-  // Still unknown — exclude and flag for diagnosis.
-  if (revenueDollars == null) return { _unknownRevenue: true, _raw: s }
+  // 6. YES-side bets: revenue_dollars = 0 reliably means YES lost (NO won, no YES payout)
+  //    NOT safe for NO-side bets (Kalshi doesn't populate revenue for NO wins either).
+  if (!winner && side === 'YES') {
+    const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
+    if (rd === 0) winner = 'no'
+  }
+
+  // Cannot determine outcome — exclude and surface both objects for diagnosis.
+  if (!winner) return { _unknownRevenue: true, _raw: s, _market: market }
+
+  // Payout = winning side's contract count × $1.00 per contract.
+  // Use the API's revenue value for YES wins if we got one (more precise).
+  const revenueDollars = revenueDollarsFromApi ?? (winner === 'yes' ? yesCount : noCount)
 
   const pnlDollars = revenueDollars - costDollars
-  const avgPriceCents = (costDollars * 100) / contracts // 1..99
+  const avgPriceCents = (costDollars * 100) / contracts
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
 
@@ -338,9 +368,11 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   let balance = null
   // Raw samples returned for diagnostics; remove once field names are confirmed.
   let rawFirstSettlement = null
-  // First settlement where revenue could not be determined — shows the exact
-  // Kalshi field names in this response so the revenue lookup can be updated.
+  // First settlement where outcome could not be determined — includes the
+  // raw settlement object AND the GetMarket response so we can see what fields
+  // Kalshi returns for these cases and add the right fallback.
   let rawZeroRevenueSample = null
+  let unknownCount = 0
   let rawBalance = null
   let rawFirstDeposit = null
   let rawFirstWithdrawal = null
@@ -352,10 +384,11 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
       for (const s of data.settlements || []) {
         if (!rawFirstSettlement) rawFirstSettlement = s
         const result = await settlementToBet(s, marketCache)
-        // settlementToBet returns { _unknownRevenue, _raw } when revenue fields
-        // can't be determined — capture the raw object and skip the bet.
+        // settlementToBet returns { _unknownRevenue, _raw, _market } when the
+        // outcome cannot be determined — capture a sample and skip the bet.
         if (result?._unknownRevenue) {
-          if (!rawZeroRevenueSample) rawZeroRevenueSample = result._raw
+          unknownCount++
+          if (!rawZeroRevenueSample) rawZeroRevenueSample = { settlement: result._raw, market: result._market }
         } else if (result) {
           bets.push(result)
         }
@@ -426,6 +459,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   return {
     bets,
     count: bets.length,
+    unknownCount,
     balance,
     transfers,
     accountErrors,

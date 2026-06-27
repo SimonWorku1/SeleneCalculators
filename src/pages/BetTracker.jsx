@@ -551,14 +551,19 @@ export default function BetTracker() {
         })
       }
 
-      // If some settlements had unrecognized revenue fields, log the raw object
-      // so the exact Kalshi field names can be identified and added to the mapper.
+      // If some settlements had unresolvable outcomes, log both the settlement and
+      // market objects so the exact Kalshi field names can be identified and the
+      // right fallback can be added to the Cloud Function mapper.
       if (data?._rawZeroRevenueSample) {
-        console.warn('[Kalshi] Settlement with unresolved revenue — raw object:', data._rawZeroRevenueSample)
+        console.warn('[Kalshi] Settlement with unknown outcome — settlement:', data._rawZeroRevenueSample?.settlement ?? data._rawZeroRevenueSample)
+        console.warn('[Kalshi] Settlement with unknown outcome — market:', data._rawZeroRevenueSample?.market)
         console.warn('[Kalshi] First settlement sample:', data._rawFirstSettlement)
       }
-      const unknownCount = (Array.isArray(data?.bets) ? 0 : 0) // placeholder — server filters these out
-      setSyncMsg('Sync complete.' + (data?._rawZeroRevenueSample ? ' ⚠ Some bets had unknown revenue fields — check browser console for raw data.' : ''))
+      const unknownCount = data?.unknownCount ?? 0
+      const unknownNote = unknownCount > 0
+        ? ` ⚠ ${unknownCount} bet${unknownCount !== 1 ? 's' : ''} excluded (outcome unknown — check console for raw data).`
+        : ''
+      setSyncMsg(`Sync complete. ${data?.count ?? 0} bets imported.` + unknownNote)
     } catch (e) {
       const msg = String(e?.message || e)
       // Kalshi's "authentication_error / NOT_FOUND" means it reached Kalshi but
