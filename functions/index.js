@@ -139,18 +139,48 @@ function americanFromDecimal(dec) {
  * the exact Kalshi field names can be diagnosed from the browser console.
  */
 async function settlementToBet(s, marketCache) {
-  const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
-  const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
-  const contracts = yesCount + noCount
+  // ── Contract counts ────────────────────────────────────────────────────────
+  let yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
+  let noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
+  let contracts = yesCount + noCount
 
+  // Fallback: signed unified count field (positive = YES long, negative = NO long)
+  if (contracts <= 0) {
+    const signed = parseFloat(s.count_fp ?? s.position_fp ?? s.net_count_fp ?? 0)
+    if (signed > 0) { yesCount = signed; contracts = signed }
+    else if (signed < 0) { noCount = Math.abs(signed); contracts = Math.abs(signed) }
+  }
+
+  // ── Cost ──────────────────────────────────────────────────────────────────
   const yesCostDollars = s.yes_total_cost_dollars != null
     ? parseFloat(s.yes_total_cost_dollars || 0)
     : (s.yes_total_cost || 0) / 100
   const noCostDollars = s.no_total_cost_dollars != null
     ? parseFloat(s.no_total_cost_dollars || 0)
     : (s.no_total_cost || 0) / 100
-  const costDollars = yesCostDollars + noCostDollars
-  if (contracts <= 0 || costDollars <= 0) return null
+  let costDollars = yesCostDollars + noCostDollars
+
+  // Fallback: unified cost field (some API versions don't split cost by side)
+  if (costDollars <= 0) {
+    costDollars = s.total_cost_dollars != null
+      ? parseFloat(s.total_cost_dollars || 0)
+      : s.cost_dollars != null
+      ? parseFloat(s.cost_dollars || 0)
+      : s.amount_dollars != null
+      ? parseFloat(s.amount_dollars || 0)
+      : s.total_cost != null
+      ? parseFloat(s.total_cost || 0) / 100
+      : s.cost != null
+      ? parseFloat(s.cost || 0) / 100
+      : 0
+  }
+
+  // If still no valid position, flag for diagnosis (don't silently drop).
+  // Only flag when there's a real ticker so truly-empty API rows are skipped.
+  if (!s.ticker) return null
+  if (contracts <= 0 || costDollars <= 0) {
+    return { _unknownRevenue: true, _raw: s, _market: null, _reason: contracts <= 0 ? 'zero_contracts' : 'zero_cost' }
+  }
 
   const side = yesCount >= noCount ? 'YES' : 'NO'
   const market = await getMarketInfo(s.ticker, marketCache)
@@ -388,7 +418,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         // outcome cannot be determined — capture a sample and skip the bet.
         if (result?._unknownRevenue) {
           unknownCount++
-          if (!rawZeroRevenueSample) rawZeroRevenueSample = { settlement: result._raw, market: result._market }
+          if (!rawZeroRevenueSample) rawZeroRevenueSample = { settlement: result._raw, market: result._market, reason: result._reason }
         } else if (result) {
           bets.push(result)
         }
