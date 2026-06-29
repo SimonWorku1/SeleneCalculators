@@ -25,7 +25,15 @@ function toDecimal(val, fmt) {
 }
 
 // Profit (not including stake) for a settled bet. Pending/push contribute 0.
+//
+// Kalshi settlements carry an exact realized P&L in `pnl` (revenue − cost −
+// fees). This is authoritative and the ONLY correct figure for mixed positions
+// — when you hold BOTH yes and no contracts on one market, profit can't be
+// reconstructed from wager×odds (that assumes every contract is on the winning
+// side). Manual bets have no `pnl`, so they fall back to the odds model.
 function betProfit(bet) {
+  if (bet.result === 'pending') return 0
+  if (typeof bet.pnl === 'number') return bet.pnl
   if (bet.result === 'won') return bet.wager * (bet.dec - 1)
   if (bet.result === 'lost') return -bet.wager
   return 0 // push or pending
@@ -564,14 +572,8 @@ export default function BetTracker() {
         console.info('[Kalshi] JUN25 settlements — disposition of EVERY record:')
         console.table(data._rawJun25Samples)
         const dropped = data._rawJun25Samples.filter(s => s.disposition?.startsWith('DROPPED'))
-        console.info(`[Kalshi] JUN25: ${data._rawJun25Samples.length} settlements, ${dropped.length} dropped (traded but not held to settlement)`)
-      }
-      if (data?._rawFirstFill) {
-        console.info('[Kalshi] Raw first FILL (trade) — field names:', data._rawFirstFill)
-      }
-      if (data?._jun25Fills?.length != null) {
-        console.info(`[Kalshi] JUN25 fills (trades): ${data._jun25Fills.length} of ${data._totalFillCount} total fills`)
-        if (data._jun25Fills.length) console.table(data._jun25Fills)
+        const total = data._rawJun25Samples.reduce((sum, s) => sum + (typeof s.pnl === 'number' ? s.pnl : 0), 0)
+        console.info(`[Kalshi] JUN25: ${data._rawJun25Samples.length} settlements, ${dropped.length} dropped, net P&L $${total.toFixed(2)}`)
       }
       if (data?._rawZeroRevenueSample) {
         const s = data._rawZeroRevenueSample

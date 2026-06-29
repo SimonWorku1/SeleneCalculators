@@ -337,11 +337,20 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
 
   // Payout = winning side's contract count × $1.00 per contract.
   // Use the API's actual revenue value when we captured it in steps 4a–4d (more precise).
+  // CRITICAL for mixed positions: when you hold BOTH yes and no contracts on a
+  // market, only the winning side pays out, but costDollars includes BOTH sides'
+  // cost. So pnl = (winning side count × $1) − (total cost both sides) − fees.
+  // This is the exact realized P&L and is what the tracker must display — the
+  // wager×odds model would wrongly count the losing-side contracts as winners.
   const revenueDollars = revenueDollarsFromApi ?? (winner === 'yes' ? yesCount : noCount)
+  const fees = parseFloat(s.fee_cost ?? s.fees ?? s.fee ?? 0) || 0
+  const pnlDollars = revenueDollars - costDollars - fees
 
-  const pnlDollars = revenueDollars - costDollars
-  const avgPriceCents = (costDollars * 100) / contracts
-  const dec = 100 / avgPriceCents
+  // Odds display: for a winning bet, derive decimal odds from the realized
+  // payout so the odds column stays consistent with P&L even for mixed
+  // positions. For losses/pushes, show the entry-price odds (what you paid).
+  const entryDec = 100 / ((costDollars * 100) / contracts)
+  const dec = pnlDollars > 0 && costDollars > 0 ? 1 + pnlDollars / costDollars : entryDec
   const american = americanFromDecimal(dec)
 
   // Prefer the date embedded in the ticker (e.g. 26JUN25 → 2026-06-25) over
@@ -358,6 +367,7 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
     description: describeMarket(market, s.ticker, side),
     sportsbook: 'Kalshi',
     wager: +costDollars.toFixed(2),
+    pnl: +pnlDollars.toFixed(2),
     odds: (american > 0 ? '+' : '') + american,
     fmt: 'american',
     dec,
@@ -534,8 +544,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
           if (!result) disposition = 'DROPPED (no net position held to settlement)'
           else if (result._unknownRevenue) disposition = `DROPPED (unknown outcome: ${result._reason || 'no_winner'})`
           else {
-            pnl = result.result === 'won' ? +(result.wager * (result.dec - 1)).toFixed(2)
-              : result.result === 'lost' ? -result.wager : 0
+            pnl = result.pnl // exact realized P&L (revenue − cost − fees)
             disposition = `IMPORTED (${result.result}, P&L ${pnl >= 0 ? '+' : ''}${pnl})`
           }
           rawJun25Samples.push({
@@ -583,34 +592,6 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   // in its own try so a failure (e.g. a key without these permissions, or a
   // renamed endpoint) is reported but never blocks the core bet sync above.
   const accountErrors = []
-
-  // DIAGNOSTIC: pull fill (trade) history to test the "scalped / exited before
-  // settlement" theory. Settlements only cover contracts held to expiry, so
-  // markets you traded and closed early are invisible there. Fills capture
-  // every trade. We summarize fills for JUN25 markets and return one raw fill
-  // so the exact Kalshi field names are visible. Best-effort; never blocks sync.
-  let rawFirstFill = null
-  const jun25Fills = []
-  let totalFillCount = 0
-  try {
-    await paginate('/portfolio/fills', keyId, privateKey, async (data) => {
-      for (const f of data.fills || []) {
-        totalFillCount++
-        if (!rawFirstFill) rawFirstFill = f
-        if (f.ticker && f.ticker.includes('JUN25')) {
-          jun25Fills.push({
-            ticker: f.ticker, side: f.side, action: f.action,
-            count: f.count ?? f.count_fp,
-            yes_price: f.yes_price, no_price: f.no_price,
-            yes_price_dollars: f.yes_price_dollars, no_price_dollars: f.no_price_dollars,
-            created_time: f.created_time,
-          })
-        }
-      }
-    })
-  } catch (err) {
-    accountErrors.push(`fills: ${err.message}`)
-  }
 
   try {
     // Cash available + total portfolio value (cash + market value of open
@@ -660,9 +641,6 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     _rawFirstNoSideSettlement: rawFirstNoSideSettlement,
     _rawZeroRevenueSample: rawZeroRevenueSample,
     _rawJun25Samples: rawJun25Samples,
-    _rawFirstFill: rawFirstFill,
-    _jun25Fills: jun25Fills,
-    _totalFillCount: totalFillCount,
     _rawBalance: rawBalance,
     _rawFirstDeposit: rawFirstDeposit,
     _rawFirstWithdrawal: rawFirstWithdrawal,
