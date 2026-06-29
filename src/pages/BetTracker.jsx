@@ -559,6 +559,9 @@ export default function BetTracker() {
       if (data?._rawFirstNoSideSettlement) {
         console.info('[Kalshi] First NO-side settlement (all fields):', data._rawFirstNoSideSettlement)
       }
+      if (data?._rawJun25Samples?.length) {
+        console.info('[Kalshi] JUN25-ticker raw settlements (first 5):', data._rawJun25Samples)
+      }
       if (data?._rawZeroRevenueSample) {
         const s = data._rawZeroRevenueSample
         console.warn('[Kalshi] Excluded settlement — reason:', s?.reason ?? 'unknown_outcome')
@@ -571,6 +574,16 @@ export default function BetTracker() {
         ? ` ⚠ ${unknownCount} bet${unknownCount !== 1 ? 's' : ''} excluded (outcome unknown — check console for raw data).`
         : ''
       setSyncMsg(`Sync complete. ${data?.count ?? 0} bets imported.` + unknownNote)
+
+      // Diagnostic: show where Jun 24-27 bets landed and flag JUN25-ticker bets on wrong date
+      const nearJun25 = incoming.filter(b => b.date && /^2026-06-2[4567]/.test(b.date))
+      if (nearJun25.length) {
+        console.info('[Kalshi] Jun 24-27 bet dates:', nearJun25.map(b => ({ date: b.date, ticker: b.ticker, result: b.result, wager: b.wager })))
+      }
+      const wrongDate = incoming.filter(b => b.ticker?.includes('JUN25') && b.date !== '2026-06-25')
+      if (wrongDate.length) {
+        console.warn('[Kalshi] JUN25-ticker bets NOT on 2026-06-25 (date parse issue?):', wrongDate.map(b => ({ date: b.date, ticker: b.ticker })))
+      }
     } catch (e) {
       const msg = String(e?.message || e)
       // Kalshi's "authentication_error / NOT_FOUND" means it reached Kalshi but

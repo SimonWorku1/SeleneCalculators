@@ -504,6 +504,9 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   // compare a known NO win/loss against the settlement fields.
   let rawFirstNoSideSettlement = null
   let unknownCount = 0
+  // Capture a few raw settlements for JUN25-ticker markets so we can see
+  // what fields Kalshi returns for that specific game date in the console.
+  const rawJun25Samples = []
   let rawBalance = null
   let rawFirstDeposit = null
   let rawFirstWithdrawal = null
@@ -519,6 +522,11 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
         const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
         if (!rawFirstNoSideSettlement && noCount > yesCount) rawFirstNoSideSettlement = s
+        // Capture raw data for JUN25-ticker settlements so the console reveals
+        // what market_result / value / revenue fields look like for that game date.
+        if (rawJun25Samples.length < 5 && s.ticker && s.ticker.includes('JUN25')) {
+          rawJun25Samples.push(s)
+        }
 
         const result = await settlementToBet(s, marketCache, keyId, privateKey)
         // settlementToBet returns { _unknownRevenue, _raw, _market } when the
@@ -604,6 +612,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     _rawFirstSettlement: rawFirstSettlement,
     _rawFirstNoSideSettlement: rawFirstNoSideSettlement,
     _rawZeroRevenueSample: rawZeroRevenueSample,
+    _rawJun25Samples: rawJun25Samples,
     _rawBalance: rawBalance,
     _rawFirstDeposit: rawFirstDeposit,
     _rawFirstWithdrawal: rawFirstWithdrawal,
