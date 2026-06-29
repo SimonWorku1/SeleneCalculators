@@ -554,12 +554,17 @@ export default function BetTracker() {
       // If some settlements had unresolvable outcomes, log both the settlement and
       // market objects so the exact Kalshi field names can be identified and the
       // right fallback can be added to the Cloud Function mapper.
+      // Always log the NO-side sample so we can inspect what Kalshi returns
+      // for NO-contract settlements regardless of whether they resolved.
+      if (data?._rawFirstNoSideSettlement) {
+        console.info('[Kalshi] First NO-side settlement (all fields):', data._rawFirstNoSideSettlement)
+      }
       if (data?._rawZeroRevenueSample) {
         const s = data._rawZeroRevenueSample
         console.warn('[Kalshi] Excluded settlement — reason:', s?.reason ?? 'unknown_outcome')
         console.warn('[Kalshi] Excluded settlement — raw:', s?.settlement ?? s)
         console.warn('[Kalshi] Excluded settlement — market:', s?.market)
-        console.warn('[Kalshi] First settlement sample (for field reference):', data._rawFirstSettlement)
+        console.warn('[Kalshi] First settlement (for YES-side field reference):', data._rawFirstSettlement)
       }
       const unknownCount = data?.unknownCount ?? 0
       const unknownNote = unknownCount > 0

@@ -80,24 +80,40 @@ async function paginate(path, keyId, privateKey, onPage, extraQs = '') {
 }
 
 /**
- * GetMarket — `/markets/{ticker}` — is public market data (no signing, no
- * API key) per Kalshi's docs. Used only to turn a raw ticker like
- * `KXWCGAME-26JUN16FRASEN-FRA` into a human-readable description instead of
- * showing the ticker itself. Cached per-ticker for the life of one sync call
- * since the same market often shows up across settlements/positions/orders.
+ * GetMarket — `/markets/{ticker}`. Originally documented as public (no auth),
+ * but Kalshi may omit `result` on the public endpoint for settled/delisted
+ * markets. We try unauthenticated first (fast, works for open markets), then
+ * fall back to an authenticated request when the result is missing — the
+ * signed request may return richer data including the settlement result.
+ *
+ * Cached per-ticker for the life of one sync call since the same market
+ * appears across settlements, positions, and orders.
  */
-async function getMarketInfo(ticker, marketCache) {
+async function getMarketInfo(ticker, marketCache, keyId, privateKey) {
   if (marketCache.has(ticker)) return marketCache.get(ticker)
   let market = null
+
+  // 1. Public (unauthenticated) endpoint — works for open / recently settled markets.
   try {
     const res = await fetch(`${HOST}${BASE}/markets/${ticker}`)
     if (res.ok) {
       const data = await res.json()
       market = data.market || null
     }
-  } catch {
-    market = null
+  } catch { /* ignore */ }
+
+  // 2. Authenticated fallback — for markets where the public endpoint returns
+  //    null (delisted/expired) or returns data without a result field.
+  //    The signed call may reveal settlement result for older markets.
+  if (keyId && privateKey && (!market || market.result == null)) {
+    try {
+      const data = await kalshiGet(`/markets/${encodeURIComponent(ticker)}`, keyId, privateKey)
+      const authMarket = data.market || null
+      // Use authenticated result if it's better (has result, or public had nothing)
+      if (authMarket && (authMarket.result != null || !market)) market = authMarket
+    } catch { /* ignore — auth failure shouldn't block the sync */ }
   }
+
   marketCache.set(ticker, market)
   return market
 }
@@ -151,7 +167,7 @@ function americanFromDecimal(dec) {
  * `_unknownRevenue` with both the raw settlement AND the raw market object so
  * the exact Kalshi field names can be diagnosed from the browser console.
  */
-async function settlementToBet(s, marketCache) {
+async function settlementToBet(s, marketCache, keyId, privateKey) {
   // ── Contract counts ────────────────────────────────────────────────────────
   let yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
   let noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
@@ -196,7 +212,7 @@ async function settlementToBet(s, marketCache) {
   }
 
   const side = yesCount >= noCount ? 'YES' : 'NO'
-  const market = await getMarketInfo(s.ticker, marketCache)
+  const market = await getMarketInfo(s.ticker, marketCache, keyId, privateKey)
 
   // ── Determine which side won ──────────────────────────────────────────────
   let winner = null // 'yes' | 'no'
@@ -330,7 +346,7 @@ async function settlementToBet(s, marketCache) {
  * `market_exposure_dollars` is the cost basis already in dollars (not
  * cents) as a numeric string.
  */
-async function positionToBet(p, marketCache) {
+async function positionToBet(p, marketCache, keyId, privateKey) {
   const signedCount = parseFloat(p.position_fp || 0)
   const contracts = Math.abs(signedCount)
   const costDollars = Math.abs(parseFloat(p.market_exposure_dollars || 0))
@@ -340,7 +356,7 @@ async function positionToBet(p, marketCache) {
   const avgPriceCents = (costDollars * 100) / contracts // 1..99
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
-  const market = await getMarketInfo(p.ticker, marketCache)
+  const market = await getMarketInfo(p.ticker, marketCache, keyId, privateKey)
 
   return {
     id: `kalshi-open-${p.ticker}`,
@@ -366,7 +382,7 @@ async function positionToBet(p, marketCache) {
  * `status=resting` orders are fetched: canceled orders have no money at
  * risk, and filled orders already show up via /portfolio/positions.
  */
-async function orderToBet(o, marketCache) {
+async function orderToBet(o, marketCache, keyId, privateKey) {
   const contracts = parseFloat(o.remaining_count_fp || 0)
   if (contracts <= 0) return null
   const side = o.side === 'no' ? 'NO' : 'YES'
@@ -377,7 +393,7 @@ async function orderToBet(o, marketCache) {
   const avgPriceCents = priceDollars * 100 // 1..99
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
-  const market = await getMarketInfo(o.ticker, marketCache)
+  const market = await getMarketInfo(o.ticker, marketCache, keyId, privateKey)
 
   return {
     id: `kalshi-order-${o.order_id}`,
@@ -453,10 +469,13 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   let balance = null
   // Raw samples returned for diagnostics; remove once field names are confirmed.
   let rawFirstSettlement = null
-  // First settlement where outcome could not be determined — includes the
-  // raw settlement object AND the GetMarket response so we can see what fields
-  // Kalshi returns for these cases and add the right fallback.
+  // First settlement where outcome could not be determined — includes the raw
+  // settlement object AND GetMarket response so missing field names are visible.
   let rawZeroRevenueSample = null
+  // First NO-side settlement (regardless of outcome) — shows what Kalshi
+  // returns for settlements where the user held NO contracts, so we can
+  // compare a known NO win/loss against the settlement fields.
+  let rawFirstNoSideSettlement = null
   let unknownCount = 0
   let rawBalance = null
   let rawFirstDeposit = null
@@ -468,7 +487,13 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     await paginate('/portfolio/settlements', keyId, privateKey, async (data) => {
       for (const s of data.settlements || []) {
         if (!rawFirstSettlement) rawFirstSettlement = s
-        const result = await settlementToBet(s, marketCache)
+        // Capture first NO-side settlement for field-level diagnosis regardless
+        // of whether it resolved — compares resolved vs unresolved NO records.
+        const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
+        const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
+        if (!rawFirstNoSideSettlement && noCount > yesCount) rawFirstNoSideSettlement = s
+
+        const result = await settlementToBet(s, marketCache, keyId, privateKey)
         // settlementToBet returns { _unknownRevenue, _raw, _market } when the
         // outcome cannot be determined — capture a sample and skip the bet.
         if (result?._unknownRevenue) {
@@ -485,7 +510,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     // position (otherwise Kalshi returns every market ever traded).
     await paginate('/portfolio/positions', keyId, privateKey, async (data) => {
       for (const p of data.market_positions || []) {
-        const bet = await positionToBet(p, marketCache)
+        const bet = await positionToBet(p, marketCache, keyId, privateKey)
         if (bet) bets.push(bet)
       }
     }, '&count_filter=position')
@@ -493,7 +518,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     // hasn't become a position yet, so it wouldn't show up above either.
     await paginate('/portfolio/orders', keyId, privateKey, async (data) => {
       for (const o of data.orders || []) {
-        const bet = await orderToBet(o, marketCache)
+        const bet = await orderToBet(o, marketCache, keyId, privateKey)
         if (bet) bets.push(bet)
       }
     }, '&status=resting')
@@ -550,6 +575,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     accountErrors,
     syncedAt: new Date().toISOString(),
     _rawFirstSettlement: rawFirstSettlement,
+    _rawFirstNoSideSettlement: rawFirstNoSideSettlement,
     _rawZeroRevenueSample: rawZeroRevenueSample,
     _rawBalance: rawBalance,
     _rawFirstDeposit: rawFirstDeposit,
