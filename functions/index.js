@@ -350,43 +350,43 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
 }
 
 /**
- * Build one bet from a market+side group of FILLS (trades), using the settled
- * market's winner. This is what makes the tracker match Pikkit bet-for-bet:
- * the settlement endpoint only knows the net contracts you HELD to expiry, so
- * a position you bought and sold back before the game (a scalp) is invisible
- * there. Fills capture every trade, so each directional bet you actually
- * placed — held or scalped — becomes its own row.
+ * Build one bet from a single ORDER's fills, using the settled market's winner.
+ * This matches Pikkit bet-for-bet: each order you placed is one row. The
+ * settlement endpoint only knows net contracts HELD to expiry, so this works
+ * off the trade history instead, where every order is visible.
  *
- * Realized P&L for a (ticker, side) = cash from sells + settlement payout on
- * any contracts still held − cash spent buying − fees. Held contracts pay $1
- * each if this side won, $0 if it lost. `g` is the accumulated fill group:
- *   { ticker, side:'yes'|'no', buyCount, buyCost, sellCount, sellProceeds, fees, lastTime }
- * `sm` is the settled-market record { winner, settledTime }.
+ * Per-order realized P&L is exact even when contracts are sold before
+ * settlement, because each order is self-contained given the outcome:
+ *   • buy  order: (won ? count·$1 : 0) − cost   — contracts pay $1 if the side won
+ *   • sell order: proceeds − (won ? count·$1 : 0) — selling forgoes that payout
+ * Summed over an order's market+side these telescope to
+ *   sellProceeds + heldPayout − buyCost — the true realized P&L — so the rows
+ * both read sensibly AND total correctly. `o` is the accumulated order:
+ *   { ticker, side:'yes'|'no', action:'buy'|'sell', count, cash, fees, time }
+ * where `cash` is cost (buys) or proceeds (sells). `sm` is { winner, settledTime }.
  */
-async function buildFillBet(g, sm, marketCache, keyId, privateKey) {
-  const wager = g.buyCost // total you put in buying this side
+async function buildOrderBet(oid, o, sm, marketCache, keyId, privateKey) {
+  const wager = o.cash
   if (!(wager > 0)) return null
+  const payout = sm.winner === o.side ? o.count : 0 // $1 per winning contract
+  const pnl = (o.action === 'sell' ? o.cash - payout : payout - o.cash) - o.fees
 
-  const heldContracts = g.buyCount - g.sellCount // net long, held to settlement
-  const settlementPayout = heldContracts > 0 && sm.winner === g.side ? heldContracts : 0
-  const pnl = g.sellProceeds + settlementPayout - g.buyCost - g.fees
-
-  const tag = g.side === 'no' ? 'NO' : 'YES'
-  const avgPriceCents = g.buyCount > 0 ? (g.buyCost * 100) / g.buyCount : 0
+  const tag = o.side === 'no' ? 'NO' : 'YES'
+  const avgPriceCents = o.count > 0 ? (o.cash * 100) / o.count : 0
   const entryDec = avgPriceCents > 0 ? 100 / avgPriceCents : 1
   // Won → odds from realized payout (consistent with P&L); else entry price.
   const dec = pnl > 0 ? 1 + pnl / wager : entryDec
   const american = americanFromDecimal(dec)
 
-  const market = await getMarketInfo(g.ticker, marketCache, keyId, privateKey)
-  const betDate = parseDateFromTicker(g.ticker) || String(sm.settledTime || '').slice(0, 10)
+  const market = await getMarketInfo(o.ticker, marketCache, keyId, privateKey)
+  const betDate = parseDateFromTicker(o.ticker) || String(sm.settledTime || '').slice(0, 10)
 
   return {
-    id: `kalshi-${g.ticker}-${tag}`,
-    ticker: g.ticker,
+    id: `kalshi-trade-${oid}`,
+    ticker: o.ticker,
     date: betDate,
     settledDate: String(sm.settledTime || '').slice(0, 10),
-    description: describeMarket(market, g.ticker, tag),
+    description: describeMarket(market, o.ticker, tag) + (o.action === 'sell' ? ' (sell)' : ''),
     sportsbook: 'Kalshi',
     wager: +wager.toFixed(2),
     pnl: +pnl.toFixed(2),
@@ -573,12 +573,12 @@ exports.syncKalshi = onCall({ cors: true, timeoutSeconds: 300, memory: '512MiB' 
       }
     })
 
-    // ── Phase B: fills (trade history) → grouped by (ticker, side) ─────────
-    // Each fill is a buy or sell of yes/no contracts at a price. We accumulate
-    // per directional position so every bet you placed — including ones you
-    // scalped out of before settlement — is represented. Wrapped so a fills
-    // failure degrades gracefully to the settlement-only path below.
-    const fillGroups = new Map() // `${ticker}|${side}` -> accumulator
+    // ── Phase B: fills (trade history) → grouped by ORDER ──────────────────
+    // Each fill is part of an order (one order fills in pieces). We accumulate
+    // fills by order_id so each order you placed becomes one bet — matching how
+    // Pikkit lists them. Wrapped so a fills failure degrades gracefully to the
+    // settlement-only path below.
+    const orders = new Map() // order_id -> accumulator
     let fillsFailed = false
     try {
       await paginate('/portfolio/fills', keyId, privateKey, async (data) => {
@@ -590,16 +590,18 @@ exports.syncKalshi = onCall({ cors: true, timeoutSeconds: 300, memory: '512MiB' 
           if (!(count > 0)) continue
           const price = parseFloat((sd === 'no' ? f.no_price_dollars : f.yes_price_dollars) ?? 0)
           const fee = parseFloat(f.fee_cost ?? f.fee ?? 0) || 0
-          const key = `${ticker}|${sd}`
-          let g = fillGroups.get(key)
-          if (!g) {
-            g = { ticker, side: sd, buyCount: 0, buyCost: 0, sellCount: 0, sellProceeds: 0, fees: 0, lastTime: f.created_time || '' }
-            fillGroups.set(key, g)
+          const action = f.action === 'sell' ? 'sell' : 'buy'
+          // Group by order; fall back to a synthetic key if order_id is absent.
+          const oid = f.order_id || f.trade_id || `${ticker}|${sd}|${action}|${f.created_time}`
+          let o = orders.get(oid)
+          if (!o) {
+            o = { ticker, side: sd, action, count: 0, cash: 0, fees: 0, time: f.created_time || '' }
+            orders.set(oid, o)
           }
-          if (f.action === 'sell') { g.sellCount += count; g.sellProceeds += count * price }
-          else { g.buyCount += count; g.buyCost += count * price }
-          g.fees += fee
-          if ((f.created_time || '') > g.lastTime) g.lastTime = f.created_time || g.lastTime
+          o.count += count
+          o.cash += count * price // cost for buys, proceeds for sells
+          o.fees += fee
+          if ((f.created_time || '') > o.time) o.time = f.created_time || o.time
         }
       })
     } catch (err) {
@@ -607,13 +609,13 @@ exports.syncKalshi = onCall({ cors: true, timeoutSeconds: 300, memory: '512MiB' 
       accountErrorsEarly.push(`fills: ${err.message}`)
     }
 
-    // ── Phase C: one settled bet per fill group whose market resolved ──────
+    // ── Phase C: one bet per order whose market resolved ───────────────────
     const tickersFromFills = new Set()
-    for (const g of fillGroups.values()) {
-      const sm = settledMarkets.get(g.ticker)
+    for (const [oid, o] of orders) {
+      const sm = settledMarkets.get(o.ticker)
       if (!sm || !sm.winner) continue // not settled yet (open) → positions loop handles it
-      tickersFromFills.add(g.ticker)
-      const bet = await buildFillBet(g, sm, marketCache, keyId, privateKey)
+      tickersFromFills.add(o.ticker)
+      const bet = await buildOrderBet(oid, o, sm, marketCache, keyId, privateKey)
       if (bet) bets.push(bet)
     }
 
