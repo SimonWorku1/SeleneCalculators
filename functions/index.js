@@ -354,6 +354,7 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
     id: `kalshi-${s.ticker}-${s.settled_time}`,
     ticker: s.ticker,
     date: betDate,
+    settledDate: String(s.settled_time || '').slice(0, 10),
     description: describeMarket(market, s.ticker, side),
     sportsbook: 'Kalshi',
     wager: +costDollars.toFixed(2),

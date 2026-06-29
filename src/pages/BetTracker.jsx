@@ -247,6 +247,7 @@ export default function BetTracker() {
   const [genCfg, setGenCfg] = useState({ betsPerDay: '5', evMin: '2', evMax: '8', bankroll: '1000', kelly: '0.5' })
   const [showManual, setShowManual] = useState(false)
   const [dayModal, setDayModal] = useState(null) // day number (in current view month) or null
+  const [dateMode, setDateMode] = useState('game') // 'game' = event date from ticker | 'settle' = UTC settled_time date
   const [syncing, setSyncing] = useState(false)
   const [sourceTab, setSourceTab] = useState('all') // all | manual | kalshi
   // Global toggle: include open/pending positions across every view.
@@ -604,12 +605,17 @@ export default function BetTracker() {
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const firstWeekday = new Date(year, month, 1).getDay()
 
+  // Returns the display date for a bet depending on the current mode.
+  // 'game': event date parsed from the ticker (e.g. 26JUN25 → 2026-06-25)
+  // 'settle': raw UTC settled_time date (YYYY-MM-DD slice of settled_time)
+  const bdate = (b) => (dateMode === 'settle' && b.settledDate) ? b.settledDate : b.date
+
   const monthBets = useMemo(
     () => bets.filter(b => {
-      const [y, m] = b.date.split('-').map(Number)
+      const [y, m] = bdate(b).split('-').map(Number)
       return y === year && m === month + 1
     }),
-    [bets, year, month]
+    [bets, year, month, dateMode] // eslint-disable-line
   )
 
   const counts = useMemo(() => {
@@ -629,20 +635,20 @@ export default function BetTracker() {
   const dayPnl = useMemo(() => {
     const map = {}
     for (const b of viewBets) {
-      const day = Number(b.date.split('-')[2])
+      const day = Number(bdate(b).split('-')[2])
       map[day] = (map[day] || 0) + betProfit(b)
     }
     return map
-  }, [viewBets])
+  }, [viewBets, dateMode]) // eslint-disable-line
 
   const dayCount = useMemo(() => {
     const map = {}
     for (const b of viewBets) {
-      const day = Number(b.date.split('-')[2])
+      const day = Number(bdate(b).split('-')[2])
       map[day] = (map[day] || 0) + 1
     }
     return map
-  }, [viewBets])
+  }, [viewBets, dateMode]) // eslint-disable-line
 
 
   // chart series — buckets depend on the selected range:
@@ -788,9 +794,9 @@ export default function BetTracker() {
   const modalBets = useMemo(() => {
     if (dayModal == null) return []
     return viewBets
-      .filter(b => Number(b.date.split('-')[2]) === dayModal)
+      .filter(b => Number(bdate(b).split('-')[2]) === dayModal)
       .sort((a, b) => betProfit(b) - betProfit(a))
-  }, [viewBets, dayModal])
+  }, [viewBets, dayModal, dateMode]) // eslint-disable-line
 
   function changeMonth(delta) {
     setView(v => {
@@ -1122,7 +1128,13 @@ export default function BetTracker() {
           <div className="card">
             <div className="bt-month-nav">
               <button className="btn btn-outline btn-sm" onClick={() => changeMonth(-1)}>← Prev</button>
-              <h2 style={{ margin: 0 }}>{MONTHS[month]} {year}</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <h2 style={{ margin: 0 }}>{MONTHS[month]} {year}</h2>
+                <div className="format-toggle" style={{ margin: 0, fontSize: 11 }}>
+                  <button className={dateMode === 'game' ? 'active' : ''} onClick={() => setDateMode('game')} title="Show bets on the game/event date (from ticker)">Game date</button>
+                  <button className={dateMode === 'settle' ? 'active' : ''} onClick={() => setDateMode('settle')} title="Show bets on the UTC settlement date">Settle date</button>
+                </div>
+              </div>
               <button className="btn btn-outline btn-sm" onClick={() => changeMonth(1)}>Next →</button>
             </div>
             <div className="bt-calendar bt-compact">
