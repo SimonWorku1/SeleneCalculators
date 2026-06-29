@@ -133,6 +133,22 @@ function americanFromDecimal(dec) {
   return dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1))
 }
 
+// Many Kalshi sports-market tickers embed the event date, e.g.
+// KXWCCORNERS-26JUN25TUNNED-9 → 2026-06-25. Using this as the bet date
+// instead of settled_time avoids UTC midnight shifts where a late-night
+// game (June 25 ET) settles June 26 UTC and lands on the wrong calendar day.
+const _MONTHS = { JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12 }
+function parseDateFromTicker(ticker) {
+  if (!ticker) return null
+  const m = ticker.match(/(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{1,2})/)
+  if (!m) return null
+  const year = 2000 + parseInt(m[1], 10)
+  const month = _MONTHS[m[2]]
+  const day = parseInt(m[3], 10)
+  if (!month || !day || day > 31) return null
+  return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+}
+
 /**
  * Map one Kalshi settlement to the tracker's bet shape.
  * Kalshi contracts settle at $1.00 (100¢); your average fill price in cents
@@ -204,9 +220,12 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
       : 0
   }
 
-  // If still no valid position, flag for diagnosis (don't silently drop).
-  // Only flag when there's a real ticker so truly-empty API rows are skipped.
   if (!s.ticker) return null
+  // Kalshi returns settlement records for every market traded in a session,
+  // including ones where the user had no position (both counts and cost are 0).
+  // These are genuinely empty — not missing-data problems — so drop silently.
+  if (contracts <= 0 && costDollars <= 0) return null
+  // Partial data (one side zero): flag for diagnosis so missing fields are visible.
   if (contracts <= 0 || costDollars <= 0) {
     return { _unknownRevenue: true, _raw: s, _market: null, _reason: contracts <= 0 ? 'zero_contracts' : 'zero_cost' }
   }
@@ -293,9 +312,11 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
     }
   }
 
-  // 5. Settlement-level price fields (0 = NO won, 100 = YES won; check ±5 for rounding)
+  // 5. Settlement-level price fields (0 = NO won, 100 = YES won; check ±5 for rounding).
+  //    `value` is the canonical settlement price confirmed from Kalshi API output
+  //    (value:0 = NO won, value:100 = YES won). Checked first as it's the most direct.
   if (!winner) {
-    const sp = s.final_price ?? s.settlement_price ?? s.result_price ?? s.last_price ?? null
+    const sp = s.value ?? s.final_price ?? s.settlement_price ?? s.result_price ?? s.last_price ?? null
     if (sp != null) {
       const p = parseFloat(sp)
       if (p >= 95) winner = 'yes'
@@ -323,10 +344,16 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
   const dec = 100 / avgPriceCents
   const american = americanFromDecimal(dec)
 
+  // Prefer the date embedded in the ticker (e.g. 26JUN25 → 2026-06-25) over
+  // settled_time to avoid UTC midnight shifts: a late-night game on June 25 ET
+  // settles June 26 UTC, which would land the bet on the wrong calendar day.
+  const betDate = parseDateFromTicker(s.ticker) || parseDateFromTicker(s.event_ticker)
+    || String(s.settled_time || '').slice(0, 10)
+
   return {
     id: `kalshi-${s.ticker}-${s.settled_time}`,
     ticker: s.ticker,
-    date: String(s.settled_time || '').slice(0, 10),
+    date: betDate,
     description: describeMarket(market, s.ticker, side),
     sportsbook: 'Kalshi',
     wager: +costDollars.toFixed(2),
