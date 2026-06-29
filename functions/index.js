@@ -134,6 +134,19 @@ function americanFromDecimal(dec) {
  *   5. Settlement-level price fields (final_price, settlement_price, etc.)
  *   6. YES-side bet + revenue_dollars = 0 → YES lost (safe for YES-only positions)
  *
+ * Signal priority for determining winner:
+ *   1. Settlement result field   (s.result / s.outcome / s.winner / etc.)
+ *   2. GetMarket result field    (market.result / market.winner / etc.)
+ *   3. Market price proxy        (last_price ≤5¢ = NO, ≥95¢ = YES)
+ *   4a. Per-side revenue_dollars (no_revenue_dollars > 0 → NO won, yes_revenue_dollars > 0 → YES won)
+ *   4b. revenue_dollars > 0      → YES won  (Kalshi only populates for YES payouts)
+ *   4c. revenue_fp > 0           → YES won
+ *   4d. Legacy revenue (cents) > 0 + side detection: for pure YES/NO positions, the only
+ *       way the user's contracts pay out is if their side won. This is the primary fix for
+ *       NO-side wins — the cents `revenue` field may be correct even when revenue_dollars=0.
+ *   5. Settlement price fields   (0 = NO, 100 = YES)
+ *   6. Pure YES bet + revenue_dollars = 0 → YES lost (revenue_dollars IS accurate for YES)
+ *
  * NO-side bets with no determinable outcome are excluded and returned as
  * `_unknownRevenue` with both the raw settlement AND the raw market object so
  * the exact Kalshi field names can be diagnosed from the browser console.
@@ -187,55 +200,97 @@ async function settlementToBet(s, marketCache) {
 
   // ── Determine which side won ──────────────────────────────────────────────
   let winner = null // 'yes' | 'no'
+  let revenueDollarsFromApi = null
 
-  // 1. Settlement record's own result field (multiple possible field names)
-  const sResult = s.result ?? s.market_result ?? s.settlement_result ?? null
+  // 1. Settlement record's own result/outcome field (try every known variant)
+  const sResult = s.result ?? s.market_result ?? s.settlement_result
+    ?? s.outcome ?? s.winner ?? s.winning_side ?? s.settled_result
+    ?? s.resolution ?? null
   if (sResult === 'yes' || sResult === 1 || sResult === true) winner = 'yes'
   else if (sResult === 'no' || sResult === 0 || sResult === false) winner = 'no'
 
-  // 2. GetMarket result field
+  // 2. GetMarket result/outcome field (try every known variant)
   if (!winner) {
-    const mResult = market?.result ?? market?.market_result ?? null
+    const mResult = market?.result ?? market?.market_result ?? market?.winner
+      ?? market?.outcome ?? market?.settled_result ?? market?.resolution ?? null
     if (mResult === 'yes') winner = 'yes'
     else if (mResult === 'no') winner = 'no'
   }
 
-  // 3. Market's last_price: settled markets trade to ≤5¢ (NO won) or ≥95¢ (YES won)
-  if (!winner && market?.last_price != null) {
-    const lp = parseFloat(market.last_price)
-    if (lp >= 95) winner = 'yes'
-    else if (lp <= 5) winner = 'no'
-  }
-
-  // 4. revenue_dollars > 0 is a reliable YES-win signal (Kalshi populates it only for YES payouts)
-  let revenueDollarsFromApi = null
+  // 3. Market price proxy: settled markets converge to ≤5¢ (NO won) or ≥95¢ (YES won)
   if (!winner) {
-    const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
-    if (rd != null && rd > 0) {
-      revenueDollarsFromApi = rd; winner = 'yes'
-    } else if ((s.yes_revenue_dollars ?? s.no_revenue_dollars) != null) {
-      const combined = parseFloat(s.yes_revenue_dollars || 0) + parseFloat(s.no_revenue_dollars || 0)
-      if (combined > 0) { revenueDollarsFromApi = combined; winner = 'yes' }
-    } else if (s.revenue_fp != null && parseFloat(s.revenue_fp) > 0) {
-      revenueDollarsFromApi = parseFloat(s.revenue_fp); winner = 'yes'
-    } else if (s.revenue != null && s.revenue > 0) {
-      revenueDollarsFromApi = s.revenue / 100; winner = 'yes'
-    }
-  }
-
-  // 5. Settlement-level price fields
-  if (!winner) {
-    const sp = s.final_price ?? s.settlement_price ?? s.result_price ?? null
-    const p = sp != null ? parseFloat(sp) : null
-    if (p !== null) {
+    const lp = market?.last_price ?? market?.close_price ?? market?.settlement_price ?? null
+    if (lp != null) {
+      const p = parseFloat(lp)
       if (p >= 95) winner = 'yes'
       else if (p <= 5) winner = 'no'
     }
   }
 
-  // 6. YES-side bets: revenue_dollars = 0 reliably means YES lost (NO won, no YES payout)
-  //    NOT safe for NO-side bets (Kalshi doesn't populate revenue for NO wins either).
-  if (!winner && side === 'YES') {
+  // 4. Revenue fields — checked in priority order with CORRECT per-side winner assignment.
+  //
+  //    Key insight: Kalshi's revenue_dollars is 0 for NO-side wins (API bug), but the
+  //    legacy integer `revenue` field (in cents) may reflect the actual payout for BOTH
+  //    sides. For a pure NO-side bet (yesCount = 0), revenue > 0 unambiguously means
+  //    NO won (the user's contracts paid out). Same logic for pure YES bets.
+  if (!winner) {
+    // 4a. Per-side dollar revenue — correctly maps each side to its winner
+    const noRevDollars = s.no_revenue_dollars != null ? parseFloat(s.no_revenue_dollars)
+      : s.no_payout_dollars != null ? parseFloat(s.no_payout_dollars)
+      : s.no_revenue_fp != null ? parseFloat(s.no_revenue_fp)
+      : null
+    const yesRevDollars = s.yes_revenue_dollars != null ? parseFloat(s.yes_revenue_dollars)
+      : s.yes_payout_dollars != null ? parseFloat(s.yes_payout_dollars)
+      : s.yes_revenue_fp != null ? parseFloat(s.yes_revenue_fp)
+      : null
+    if (noRevDollars != null && noRevDollars > 0) {
+      winner = 'no'; revenueDollarsFromApi = noRevDollars
+    } else if (yesRevDollars != null && yesRevDollars > 0) {
+      winner = 'yes'; revenueDollarsFromApi = yesRevDollars
+    }
+  }
+
+  if (!winner) {
+    // 4b. Combined revenue_dollars: only reliable as a positive YES signal
+    const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
+    if (rd != null && rd > 0) { winner = 'yes'; revenueDollarsFromApi = rd }
+  }
+
+  if (!winner) {
+    // 4c. revenue_fp (fixed-point string, same semantic as revenue_dollars)
+    const rf = s.revenue_fp != null ? parseFloat(s.revenue_fp) : null
+    if (rf != null && rf > 0) { winner = 'yes'; revenueDollarsFromApi = rf }
+  }
+
+  if (!winner) {
+    // 4d. Legacy `revenue` field in integer CENTS (the field that caused the 100× inflation
+    //     bug before it was superseded by revenue_dollars). Kalshi may still populate it for
+    //     BOTH YES and NO side settlements. For a PURE NO bet (yesCount = 0), revenue > 0
+    //     can ONLY mean NO won (the user's NO contracts paid out). Same for pure YES bets.
+    //     Mixed positions (rare): fall back to `side` heuristic.
+    const revCents = s.revenue != null ? parseFloat(s.revenue) : null
+    if (revCents != null && revCents > 0) {
+      revenueDollarsFromApi = revCents / 100
+      if (yesCount > 0 && noCount === 0) winner = 'yes'       // pure YES position → YES paid
+      else if (noCount > 0 && yesCount === 0) winner = 'no'   // pure NO position  → NO paid
+      else winner = side                                        // mixed: best guess
+    }
+  }
+
+  // 5. Settlement-level price fields (0 = NO won, 100 = YES won; check ±5 for rounding)
+  if (!winner) {
+    const sp = s.final_price ?? s.settlement_price ?? s.result_price ?? s.last_price ?? null
+    if (sp != null) {
+      const p = parseFloat(sp)
+      if (p >= 95) winner = 'yes'
+      else if (p <= 5) winner = 'no'
+    }
+  }
+
+  // 6. YES-side bet + revenue_dollars = 0 → YES lost (safe only for pure YES positions:
+  //    revenue_dollars IS accurate for YES wins, so 0 confirms the loss).
+  //    NOT used for NO-side: Kalshi sets revenue_dollars = 0 for both NO wins AND NO losses.
+  if (!winner && side === 'YES' && yesCount > 0 && noCount === 0) {
     const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
     if (rd === 0) winner = 'no'
   }
@@ -244,7 +299,7 @@ async function settlementToBet(s, marketCache) {
   if (!winner) return { _unknownRevenue: true, _raw: s, _market: market }
 
   // Payout = winning side's contract count × $1.00 per contract.
-  // Use the API's revenue value for YES wins if we got one (more precise).
+  // Use the API's actual revenue value when we captured it in steps 4a–4d (more precise).
   const revenueDollars = revenueDollarsFromApi ?? (winner === 'yes' ? yesCount : noCount)
 
   const pnlDollars = revenueDollars - costDollars
