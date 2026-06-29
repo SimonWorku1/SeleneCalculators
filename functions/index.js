@@ -220,14 +220,18 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
       : 0
   }
 
-  if (!s.ticker) return null
+  // settlementToBet returns an ARRAY of bets: one per side actually held (a
+  // mixed yes+no position becomes two directional bets), empty when there's
+  // nothing to import, or a single { _unknownRevenue } marker when the outcome
+  // can't be determined.
+  if (!s.ticker) return []
   // Kalshi returns settlement records for every market traded in a session,
   // including ones where the user had no position (both counts and cost are 0).
   // These are genuinely empty — not missing-data problems — so drop silently.
-  if (contracts <= 0 && costDollars <= 0) return null
+  if (contracts <= 0 && costDollars <= 0) return []
   // Partial data (one side zero): flag for diagnosis so missing fields are visible.
   if (contracts <= 0 || costDollars <= 0) {
-    return { _unknownRevenue: true, _raw: s, _market: null, _reason: contracts <= 0 ? 'zero_contracts' : 'zero_cost' }
+    return [{ _unknownRevenue: true, _raw: s, _market: null, _reason: contracts <= 0 ? 'zero_contracts' : 'zero_cost' }]
   }
 
   const side = yesCount >= noCount ? 'YES' : 'NO'
@@ -333,47 +337,54 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
   }
 
   // Cannot determine outcome — exclude and surface both objects for diagnosis.
-  if (!winner) return { _unknownRevenue: true, _raw: s, _market: market }
-
-  // Payout = winning side's contract count × $1.00 per contract.
-  // Use the API's actual revenue value when we captured it in steps 4a–4d (more precise).
-  // CRITICAL for mixed positions: when you hold BOTH yes and no contracts on a
-  // market, only the winning side pays out, but costDollars includes BOTH sides'
-  // cost. So pnl = (winning side count × $1) − (total cost both sides) − fees.
-  // This is the exact realized P&L and is what the tracker must display — the
-  // wager×odds model would wrongly count the losing-side contracts as winners.
-  const revenueDollars = revenueDollarsFromApi ?? (winner === 'yes' ? yesCount : noCount)
-  const fees = parseFloat(s.fee_cost ?? s.fees ?? s.fee ?? 0) || 0
-  const pnlDollars = revenueDollars - costDollars - fees
-
-  // Odds display: for a winning bet, derive decimal odds from the realized
-  // payout so the odds column stays consistent with P&L even for mixed
-  // positions. For losses/pushes, show the entry-price odds (what you paid).
-  const entryDec = 100 / ((costDollars * 100) / contracts)
-  const dec = pnlDollars > 0 && costDollars > 0 ? 1 + pnlDollars / costDollars : entryDec
-  const american = americanFromDecimal(dec)
+  if (!winner) return [{ _unknownRevenue: true, _raw: s, _market: market }]
 
   // Prefer the date embedded in the ticker (e.g. 26JUN25 → 2026-06-25) over
   // settled_time to avoid UTC midnight shifts: a late-night game on June 25 ET
   // settles June 26 UTC, which would land the bet on the wrong calendar day.
   const betDate = parseDateFromTicker(s.ticker) || parseDateFromTicker(s.event_ticker)
     || String(s.settled_time || '').slice(0, 10)
+  const settledDate = String(s.settled_time || '').slice(0, 10)
+  const totalFee = parseFloat(s.fee_cost ?? s.fees ?? s.fee ?? 0) || 0
 
-  return {
-    id: `kalshi-${s.ticker}-${s.settled_time}`,
-    ticker: s.ticker,
-    date: betDate,
-    settledDate: String(s.settled_time || '').slice(0, 10),
-    description: describeMarket(market, s.ticker, side),
-    sportsbook: 'Kalshi',
-    wager: +costDollars.toFixed(2),
-    pnl: +pnlDollars.toFixed(2),
-    odds: (american > 0 ? '+' : '') + american,
-    fmt: 'american',
-    dec,
-    result: pnlDollars > 0 ? 'won' : pnlDollars < 0 ? 'lost' : 'push',
-    source: 'kalshi',
-  }
+  // Emit ONE bet per side you actually held. A market where you bought both
+  // yes and no contracts is two distinct directional bets (Over and Under),
+  // so splitting them keeps each row internally consistent — wager, odds, and
+  // P&L all agree — and matches how Pikkit lists them. A pure one-sided
+  // position yields a single bet. Each contract pays $1 if its side won, $0 if
+  // it lost; fees are allocated to each side in proportion to its cost.
+  const sides = []
+  if (yesCount > 0 && yesCostDollars > 0) sides.push({ tag: 'YES', count: yesCount, cost: yesCostDollars })
+  if (noCount > 0 && noCostDollars > 0) sides.push({ tag: 'NO', count: noCount, cost: noCostDollars })
+  // Fallback: cost data missing but a position exists — emit one combined bet
+  // rather than silently dropping it.
+  if (sides.length === 0) sides.push({ tag: side, count: contracts, cost: costDollars })
+
+  return sides.map(({ tag, count, cost }) => {
+    const payout = winner === tag.toLowerCase() ? count : 0 // $1 per winning contract
+    const fee = costDollars > 0 ? totalFee * (cost / costDollars) : 0
+    const pnl = payout - cost - fee
+    // Won → decimal odds from the realized payout so the odds column agrees
+    // with P&L; lost/push → entry-price odds (the price you actually paid).
+    const entryDec = count > 0 ? 100 / ((cost * 100) / count) : 1
+    const dec = pnl > 0 && cost > 0 ? 1 + pnl / cost : entryDec
+    const american = americanFromDecimal(dec)
+    return {
+      id: `kalshi-${s.ticker}-${s.settled_time}-${tag}`,
+      ticker: s.ticker,
+      date: betDate,
+      settledDate,
+      description: describeMarket(market, s.ticker, tag),
+      sportsbook: 'Kalshi',
+      wager: +cost.toFixed(2),
+      pnl: +pnl.toFixed(2),
+      odds: (american > 0 ? '+' : '') + american,
+      fmt: 'american',
+      dec,
+      result: pnl > 0 ? 'won' : pnl < 0 ? 'lost' : 'push',
+      source: 'kalshi',
+    }
+  })
 }
 
 /**
@@ -534,18 +545,22 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
         if (!rawFirstNoSideSettlement && noCount > yesCount) rawFirstNoSideSettlement = s
 
-        const result = await settlementToBet(s, marketCache, keyId, privateKey)
+        // settlementToBet returns an ARRAY: one bet per side held, [] when
+        // there's nothing to import, or a single { _unknownRevenue } marker.
+        const results = await settlementToBet(s, marketCache, keyId, privateKey)
 
         // Diagnostic: capture EVERY JUN25-ticker settlement with its disposition
-        // (imported as W/L with P&L, or dropped + reason) so we can reconcile
-        // against Pikkit row-by-row and see which markets we silently drop.
+        // (which bets it produced + net P&L, or dropped + reason) so we can
+        // reconcile against Pikkit row-by-row.
         if (s.ticker && s.ticker.includes('JUN25')) {
+          const unknown = results.find(r => r._unknownRevenue)
+          const imported = results.filter(r => !r._unknownRevenue)
           let disposition, pnl = null
-          if (!result) disposition = 'DROPPED (no net position held to settlement)'
-          else if (result._unknownRevenue) disposition = `DROPPED (unknown outcome: ${result._reason || 'no_winner'})`
+          if (results.length === 0) disposition = 'DROPPED (no net position held to settlement)'
+          else if (unknown) disposition = `DROPPED (unknown outcome: ${unknown._reason || 'no_winner'})`
           else {
-            pnl = result.pnl // exact realized P&L (revenue − cost − fees)
-            disposition = `IMPORTED (${result.result}, P&L ${pnl >= 0 ? '+' : ''}${pnl})`
+            pnl = +imported.reduce((sum, b) => sum + b.pnl, 0).toFixed(2)
+            disposition = `IMPORTED (${imported.length} bet${imported.length !== 1 ? 's' : ''}, net P&L ${pnl >= 0 ? '+' : ''}${pnl})`
           }
           rawJun25Samples.push({
             ticker: s.ticker,
@@ -556,13 +571,13 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
           })
         }
 
-        // settlementToBet returns { _unknownRevenue, _raw, _market } when the
-        // outcome cannot be determined — capture a sample and skip the bet.
-        if (result?._unknownRevenue) {
-          unknownCount++
-          if (!rawZeroRevenueSample) rawZeroRevenueSample = { settlement: result._raw, market: result._market, reason: result._reason }
-        } else if (result) {
-          bets.push(result)
+        for (const r of results) {
+          if (r._unknownRevenue) {
+            unknownCount++
+            if (!rawZeroRevenueSample) rawZeroRevenueSample = { settlement: r._raw, market: r._market, reason: r._reason }
+          } else {
+            bets.push(r)
+          }
         }
       }
     })

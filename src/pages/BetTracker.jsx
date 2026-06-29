@@ -518,18 +518,17 @@ export default function BetTracker() {
       const { data } = await fn({ keyId: kKeyId, privateKey: kPriv })
       const incoming = Array.isArray(data?.bets) ? data.bets : []
       setBets(prev => {
-        // A ticker can move between pending sources across syncs — a resting
-        // order fills (becomes a position), a position settles, etc. Drop any
-        // old pending placeholder for a ticker this sync touched at all, so
-        // it gets replaced by the fresh picture instead of lingering as a
-        // duplicate alongside it.
-        // Also drop any existing bet whose id appears in the fresh sync data —
-        // the server's data always wins, which clears stale records left over
-        // from earlier syncs that used a different field mapping.
+        // The fresh sync is authoritative for every ticker it returns, so drop
+        // ALL existing Kalshi bets for any touched ticker before re-adding the
+        // fresh ones. This matters because a single settlement can now map to
+        // multiple bets (one per side held) with side-suffixed ids — an id-only
+        // dedup would leave stale combined bets from older syncs lingering as
+        // duplicates. Kalshi bets for tickers NOT in this sync (older history
+        // beyond the fetch window) are left untouched, as are manual bets.
         const touchedTickers = new Set(incoming.filter(b => b.ticker).map(b => b.ticker))
         const incomingIds = new Set(incoming.filter(b => b?.id).map(b => b.id))
         const withoutStale = prev.filter(
-          b => !(b.source === 'kalshi' && b.result === 'pending' && touchedTickers.has(b.ticker))
+          b => !(b.source === 'kalshi' && touchedTickers.has(b.ticker))
                && !incomingIds.has(b.id)
         )
         const fresh = incoming
