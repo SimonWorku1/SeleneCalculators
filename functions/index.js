@@ -150,6 +150,66 @@ function parseDateFromTicker(ticker) {
 }
 
 /**
+ * Determine which side of a settled market won — 'yes', 'no', or null when it
+ * can't be told. Tries the settlement record's own fields first (the most
+ * reliable: Kalshi puts `market_result` and `value` directly on the record),
+ * then the GetMarket response, then price/revenue proxies. Pure detection only,
+ * no payout math — used both for fill-replay (which side held contracts pay
+ * out) and as the settlement-mapper's outcome signal.
+ */
+function determineWinner(s, market) {
+  const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
+  const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
+  const side = yesCount >= noCount ? 'yes' : 'no'
+
+  // 1. Settlement record's own result/outcome field (every known variant)
+  const sResult = s.result ?? s.market_result ?? s.settlement_result
+    ?? s.outcome ?? s.winner ?? s.winning_side ?? s.settled_result ?? s.resolution ?? null
+  if (sResult === 'yes' || sResult === 1 || sResult === true) return 'yes'
+  if (sResult === 'no' || sResult === 0 || sResult === false) return 'no'
+
+  // 2. GetMarket result/outcome field
+  const mResult = market?.result ?? market?.market_result ?? market?.winner
+    ?? market?.outcome ?? market?.settled_result ?? market?.resolution ?? null
+  if (mResult === 'yes') return 'yes'
+  if (mResult === 'no') return 'no'
+
+  // 3. Market price proxy: settled markets converge to ≤5¢ (NO) or ≥95¢ (YES)
+  const lp = market?.last_price ?? market?.close_price ?? market?.settlement_price ?? null
+  if (lp != null) { const p = parseFloat(lp); if (p >= 95) return 'yes'; if (p <= 5) return 'no' }
+
+  // 4. Revenue fields (per-side dollar revenue, then combined positive = YES,
+  //    then legacy cents `revenue` with pure-position side detection)
+  const noRev = s.no_revenue_dollars != null ? parseFloat(s.no_revenue_dollars)
+    : s.no_payout_dollars != null ? parseFloat(s.no_payout_dollars)
+    : s.no_revenue_fp != null ? parseFloat(s.no_revenue_fp) : null
+  const yesRev = s.yes_revenue_dollars != null ? parseFloat(s.yes_revenue_dollars)
+    : s.yes_payout_dollars != null ? parseFloat(s.yes_payout_dollars)
+    : s.yes_revenue_fp != null ? parseFloat(s.yes_revenue_fp) : null
+  if (noRev != null && noRev > 0) return 'no'
+  if (yesRev != null && yesRev > 0) return 'yes'
+  const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
+  if (rd != null && rd > 0) return 'yes'
+  const rf = s.revenue_fp != null ? parseFloat(s.revenue_fp) : null
+  if (rf != null && rf > 0) return 'yes'
+  const revCents = s.revenue != null ? parseFloat(s.revenue) : null
+  if (revCents != null && revCents > 0) {
+    if (yesCount > 0 && noCount === 0) return 'yes'
+    if (noCount > 0 && yesCount === 0) return 'no'
+    return side
+  }
+
+  // 5. Settlement price / value (value:0 = NO won, value:100 = YES won)
+  const sp = s.value ?? s.final_price ?? s.settlement_price ?? s.result_price ?? s.last_price ?? null
+  if (sp != null) { const p = parseFloat(sp); if (p >= 95) return 'yes'; if (p <= 5) return 'no' }
+
+  // 6. Pure YES position + revenue_dollars = 0 → YES lost (accurate for YES only)
+  if (side === 'yes' && yesCount > 0 && noCount === 0 && rd === 0) return 'no'
+
+  return null
+}
+
+/**
  * Map one Kalshi settlement to the tracker's bet shape.
  * Kalshi contracts settle at $1.00 (100¢); your average fill price in cents
  * is the implied probability, so decimal odds = 100 / avgPriceCents.
@@ -237,106 +297,8 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
   const side = yesCount >= noCount ? 'YES' : 'NO'
   const market = await getMarketInfo(s.ticker, marketCache, keyId, privateKey)
 
-  // ── Determine which side won ──────────────────────────────────────────────
-  let winner = null // 'yes' | 'no'
-  let revenueDollarsFromApi = null
-
-  // 1. Settlement record's own result/outcome field (try every known variant)
-  const sResult = s.result ?? s.market_result ?? s.settlement_result
-    ?? s.outcome ?? s.winner ?? s.winning_side ?? s.settled_result
-    ?? s.resolution ?? null
-  if (sResult === 'yes' || sResult === 1 || sResult === true) winner = 'yes'
-  else if (sResult === 'no' || sResult === 0 || sResult === false) winner = 'no'
-
-  // 2. GetMarket result/outcome field (try every known variant)
-  if (!winner) {
-    const mResult = market?.result ?? market?.market_result ?? market?.winner
-      ?? market?.outcome ?? market?.settled_result ?? market?.resolution ?? null
-    if (mResult === 'yes') winner = 'yes'
-    else if (mResult === 'no') winner = 'no'
-  }
-
-  // 3. Market price proxy: settled markets converge to ≤5¢ (NO won) or ≥95¢ (YES won)
-  if (!winner) {
-    const lp = market?.last_price ?? market?.close_price ?? market?.settlement_price ?? null
-    if (lp != null) {
-      const p = parseFloat(lp)
-      if (p >= 95) winner = 'yes'
-      else if (p <= 5) winner = 'no'
-    }
-  }
-
-  // 4. Revenue fields — checked in priority order with CORRECT per-side winner assignment.
-  //
-  //    Key insight: Kalshi's revenue_dollars is 0 for NO-side wins (API bug), but the
-  //    legacy integer `revenue` field (in cents) may reflect the actual payout for BOTH
-  //    sides. For a pure NO-side bet (yesCount = 0), revenue > 0 unambiguously means
-  //    NO won (the user's contracts paid out). Same logic for pure YES bets.
-  if (!winner) {
-    // 4a. Per-side dollar revenue — correctly maps each side to its winner
-    const noRevDollars = s.no_revenue_dollars != null ? parseFloat(s.no_revenue_dollars)
-      : s.no_payout_dollars != null ? parseFloat(s.no_payout_dollars)
-      : s.no_revenue_fp != null ? parseFloat(s.no_revenue_fp)
-      : null
-    const yesRevDollars = s.yes_revenue_dollars != null ? parseFloat(s.yes_revenue_dollars)
-      : s.yes_payout_dollars != null ? parseFloat(s.yes_payout_dollars)
-      : s.yes_revenue_fp != null ? parseFloat(s.yes_revenue_fp)
-      : null
-    if (noRevDollars != null && noRevDollars > 0) {
-      winner = 'no'; revenueDollarsFromApi = noRevDollars
-    } else if (yesRevDollars != null && yesRevDollars > 0) {
-      winner = 'yes'; revenueDollarsFromApi = yesRevDollars
-    }
-  }
-
-  if (!winner) {
-    // 4b. Combined revenue_dollars: only reliable as a positive YES signal
-    const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
-    if (rd != null && rd > 0) { winner = 'yes'; revenueDollarsFromApi = rd }
-  }
-
-  if (!winner) {
-    // 4c. revenue_fp (fixed-point string, same semantic as revenue_dollars)
-    const rf = s.revenue_fp != null ? parseFloat(s.revenue_fp) : null
-    if (rf != null && rf > 0) { winner = 'yes'; revenueDollarsFromApi = rf }
-  }
-
-  if (!winner) {
-    // 4d. Legacy `revenue` field in integer CENTS (the field that caused the 100× inflation
-    //     bug before it was superseded by revenue_dollars). Kalshi may still populate it for
-    //     BOTH YES and NO side settlements. For a PURE NO bet (yesCount = 0), revenue > 0
-    //     can ONLY mean NO won (the user's NO contracts paid out). Same for pure YES bets.
-    //     Mixed positions (rare): fall back to `side` heuristic.
-    const revCents = s.revenue != null ? parseFloat(s.revenue) : null
-    if (revCents != null && revCents > 0) {
-      revenueDollarsFromApi = revCents / 100
-      if (yesCount > 0 && noCount === 0) winner = 'yes'       // pure YES position → YES paid
-      else if (noCount > 0 && yesCount === 0) winner = 'no'   // pure NO position  → NO paid
-      else winner = side                                        // mixed: best guess
-    }
-  }
-
-  // 5. Settlement-level price fields (0 = NO won, 100 = YES won; check ±5 for rounding).
-  //    `value` is the canonical settlement price confirmed from Kalshi API output
-  //    (value:0 = NO won, value:100 = YES won). Checked first as it's the most direct.
-  if (!winner) {
-    const sp = s.value ?? s.final_price ?? s.settlement_price ?? s.result_price ?? s.last_price ?? null
-    if (sp != null) {
-      const p = parseFloat(sp)
-      if (p >= 95) winner = 'yes'
-      else if (p <= 5) winner = 'no'
-    }
-  }
-
-  // 6. YES-side bet + revenue_dollars = 0 → YES lost (safe only for pure YES positions:
-  //    revenue_dollars IS accurate for YES wins, so 0 confirms the loss).
-  //    NOT used for NO-side: Kalshi sets revenue_dollars = 0 for both NO wins AND NO losses.
-  if (!winner && side === 'YES' && yesCount > 0 && noCount === 0) {
-    const rd = s.revenue_dollars != null ? parseFloat(s.revenue_dollars) : null
-    if (rd === 0) winner = 'no'
-  }
-
   // Cannot determine outcome — exclude and surface both objects for diagnosis.
+  const winner = determineWinner(s, market)
   if (!winner) return [{ _unknownRevenue: true, _raw: s, _market: market }]
 
   // Prefer the date embedded in the ticker (e.g. 26JUN25 → 2026-06-25) over
@@ -385,6 +347,55 @@ async function settlementToBet(s, marketCache, keyId, privateKey) {
       source: 'kalshi',
     }
   })
+}
+
+/**
+ * Build one bet from a market+side group of FILLS (trades), using the settled
+ * market's winner. This is what makes the tracker match Pikkit bet-for-bet:
+ * the settlement endpoint only knows the net contracts you HELD to expiry, so
+ * a position you bought and sold back before the game (a scalp) is invisible
+ * there. Fills capture every trade, so each directional bet you actually
+ * placed — held or scalped — becomes its own row.
+ *
+ * Realized P&L for a (ticker, side) = cash from sells + settlement payout on
+ * any contracts still held − cash spent buying − fees. Held contracts pay $1
+ * each if this side won, $0 if it lost. `g` is the accumulated fill group:
+ *   { ticker, side:'yes'|'no', buyCount, buyCost, sellCount, sellProceeds, fees, lastTime }
+ * `sm` is the settled-market record { winner, settledTime }.
+ */
+async function buildFillBet(g, sm, marketCache, keyId, privateKey) {
+  const wager = g.buyCost // total you put in buying this side
+  if (!(wager > 0)) return null
+
+  const heldContracts = g.buyCount - g.sellCount // net long, held to settlement
+  const settlementPayout = heldContracts > 0 && sm.winner === g.side ? heldContracts : 0
+  const pnl = g.sellProceeds + settlementPayout - g.buyCost - g.fees
+
+  const tag = g.side === 'no' ? 'NO' : 'YES'
+  const avgPriceCents = g.buyCount > 0 ? (g.buyCost * 100) / g.buyCount : 0
+  const entryDec = avgPriceCents > 0 ? 100 / avgPriceCents : 1
+  // Won → odds from realized payout (consistent with P&L); else entry price.
+  const dec = pnl > 0 ? 1 + pnl / wager : entryDec
+  const american = americanFromDecimal(dec)
+
+  const market = await getMarketInfo(g.ticker, marketCache, keyId, privateKey)
+  const betDate = parseDateFromTicker(g.ticker) || String(sm.settledTime || '').slice(0, 10)
+
+  return {
+    id: `kalshi-${g.ticker}-${tag}`,
+    ticker: g.ticker,
+    date: betDate,
+    settledDate: String(sm.settledTime || '').slice(0, 10),
+    description: describeMarket(market, g.ticker, tag),
+    sportsbook: 'Kalshi',
+    wager: +wager.toFixed(2),
+    pnl: +pnl.toFixed(2),
+    odds: (american > 0 ? '+' : '') + american,
+    fmt: 'american',
+    dec,
+    result: pnl > 0 ? 'won' : pnl < 0 ? 'lost' : 'push',
+    source: 'kalshi',
+  }
 }
 
 /**
@@ -503,7 +514,7 @@ function transferRecord(t, kind) {
  * The credentials are used only to sign this request's calls and are never
  * stored server-side.
  */
-exports.syncKalshi = onCall({ cors: true }, async (request) => {
+exports.syncKalshi = onCall({ cors: true, timeoutSeconds: 300, memory: '512MiB' }, async (request) => {
   // Trim so stray whitespace/newlines from pasting don't end up in the
   // KALSHI-ACCESS-KEY header — Kalshi looks up the key verbatim and a trailing
   // space makes it report authentication_error / NOT_FOUND on a valid key.
@@ -535,52 +546,98 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   // Caches GetMarket lookups by ticker for the life of this sync call, since
   // the same market often appears across settlements/positions/orders.
   const marketCache = new Map()
+  // Non-fatal notes from the bet sync (e.g. fills endpoint unavailable). Merged
+  // into accountErrors below so the UI can surface them without failing.
+  const accountErrorsEarly = []
   try {
+    // ── Phase A: settlements → which side won, per ticker ──────────────────
+    // Settlements no longer become bets directly; they record the outcome so
+    // the fill-replay below can compute realized P&L. (They're also the
+    // fallback for markets whose fills fall outside the fetch window.)
+    const settledMarkets = new Map() // ticker -> { winner, settledTime, raw }
     await paginate('/portfolio/settlements', keyId, privateKey, async (data) => {
       for (const s of data.settlements || []) {
         if (!rawFirstSettlement) rawFirstSettlement = s
-        // Capture first NO-side settlement for field-level diagnosis regardless
-        // of whether it resolved — compares resolved vs unresolved NO records.
+        if (!s.ticker) continue
         const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
         const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
         if (!rawFirstNoSideSettlement && noCount > yesCount) rawFirstNoSideSettlement = s
-
-        // settlementToBet returns an ARRAY: one bet per side held, [] when
-        // there's nothing to import, or a single { _unknownRevenue } marker.
-        const results = await settlementToBet(s, marketCache, keyId, privateKey)
-
-        // Diagnostic: capture EVERY JUN25-ticker settlement with its disposition
-        // (which bets it produced + net P&L, or dropped + reason) so we can
-        // reconcile against Pikkit row-by-row.
-        if (s.ticker && s.ticker.includes('JUN25')) {
-          const unknown = results.find(r => r._unknownRevenue)
-          const imported = results.filter(r => !r._unknownRevenue)
-          let disposition, pnl = null
-          if (results.length === 0) disposition = 'DROPPED (no net position held to settlement)'
-          else if (unknown) disposition = `DROPPED (unknown outcome: ${unknown._reason || 'no_winner'})`
-          else {
-            pnl = +imported.reduce((sum, b) => sum + b.pnl, 0).toFixed(2)
-            disposition = `IMPORTED (${imported.length} bet${imported.length !== 1 ? 's' : ''}, net P&L ${pnl >= 0 ? '+' : ''}${pnl})`
-          }
-          rawJun25Samples.push({
-            ticker: s.ticker,
-            yes_count_fp: s.yes_count_fp, no_count_fp: s.no_count_fp,
-            yes_cost: s.yes_total_cost_dollars, no_cost: s.no_total_cost_dollars,
-            market_result: s.market_result, value: s.value, revenue: s.revenue,
-            disposition, pnl,
-          })
+        // Resolve the winner from the settlement's own fields first; only pay
+        // for a GetMarket lookup when those don't determine it.
+        let winner = determineWinner(s, null)
+        if (!winner) {
+          const market = await getMarketInfo(s.ticker, marketCache, keyId, privateKey)
+          winner = determineWinner(s, market)
         }
-
-        for (const r of results) {
-          if (r._unknownRevenue) {
-            unknownCount++
-            if (!rawZeroRevenueSample) rawZeroRevenueSample = { settlement: r._raw, market: r._market, reason: r._reason }
-          } else {
-            bets.push(r)
-          }
-        }
+        settledMarkets.set(s.ticker, { winner, settledTime: s.settled_time, raw: s })
       }
     })
+
+    // ── Phase B: fills (trade history) → grouped by (ticker, side) ─────────
+    // Each fill is a buy or sell of yes/no contracts at a price. We accumulate
+    // per directional position so every bet you placed — including ones you
+    // scalped out of before settlement — is represented. Wrapped so a fills
+    // failure degrades gracefully to the settlement-only path below.
+    const fillGroups = new Map() // `${ticker}|${side}` -> accumulator
+    let fillsFailed = false
+    try {
+      await paginate('/portfolio/fills', keyId, privateKey, async (data) => {
+        for (const f of data.fills || []) {
+          const ticker = f.ticker
+          if (!ticker) continue
+          const sd = f.side === 'no' ? 'no' : 'yes'
+          const count = parseFloat(f.count_fp ?? f.count ?? 0)
+          if (!(count > 0)) continue
+          const price = parseFloat((sd === 'no' ? f.no_price_dollars : f.yes_price_dollars) ?? 0)
+          const fee = parseFloat(f.fee_cost ?? f.fee ?? 0) || 0
+          const key = `${ticker}|${sd}`
+          let g = fillGroups.get(key)
+          if (!g) {
+            g = { ticker, side: sd, buyCount: 0, buyCost: 0, sellCount: 0, sellProceeds: 0, fees: 0, lastTime: f.created_time || '' }
+            fillGroups.set(key, g)
+          }
+          if (f.action === 'sell') { g.sellCount += count; g.sellProceeds += count * price }
+          else { g.buyCount += count; g.buyCost += count * price }
+          g.fees += fee
+          if ((f.created_time || '') > g.lastTime) g.lastTime = f.created_time || g.lastTime
+        }
+      })
+    } catch (err) {
+      fillsFailed = true
+      accountErrorsEarly.push(`fills: ${err.message}`)
+    }
+
+    // ── Phase C: one settled bet per fill group whose market resolved ──────
+    const tickersFromFills = new Set()
+    for (const g of fillGroups.values()) {
+      const sm = settledMarkets.get(g.ticker)
+      if (!sm || !sm.winner) continue // not settled yet (open) → positions loop handles it
+      tickersFromFills.add(g.ticker)
+      const bet = await buildFillBet(g, sm, marketCache, keyId, privateKey)
+      if (bet) bets.push(bet)
+    }
+
+    // ── Phase D: settled markets with no usable fills → settlement split ───
+    for (const [ticker, sm] of settledMarkets) {
+      if (tickersFromFills.has(ticker)) continue
+      const results = await settlementToBet(sm.raw, marketCache, keyId, privateKey)
+      for (const r of results) {
+        if (r._unknownRevenue) {
+          unknownCount++
+          if (!rawZeroRevenueSample) rawZeroRevenueSample = { settlement: r._raw, market: r._market, reason: r._reason }
+        } else {
+          bets.push(r)
+        }
+      }
+    }
+    if (fillsFailed) accountErrorsEarly.push('note: fills unavailable — used settlement-only P&L (scalps excluded)')
+
+    // Diagnostic: JUN25 bets as finally built, for row-by-row Pikkit checks.
+    for (const b of bets) {
+      if (b.ticker && b.ticker.includes('JUN25')) {
+        rawJun25Samples.push({ ticker: b.ticker, date: b.date, wager: b.wager, pnl: b.pnl, result: b.result })
+      }
+    }
     // Open (not yet settled) positions, so a filled bet shows up as
     // "pending" immediately instead of waiting for the market to resolve.
     // count_filter=position restricts results to markets with a non-zero
@@ -606,7 +663,7 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   // Account info (balance + cash flow) is a best-effort add-on: each call runs
   // in its own try so a failure (e.g. a key without these permissions, or a
   // renamed endpoint) is reported but never blocks the core bet sync above.
-  const accountErrors = []
+  const accountErrors = [...accountErrorsEarly]
 
   try {
     // Cash available + total portfolio value (cash + market value of open

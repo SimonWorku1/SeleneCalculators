@@ -568,11 +568,10 @@ export default function BetTracker() {
         console.info('[Kalshi] First NO-side settlement (all fields):', data._rawFirstNoSideSettlement)
       }
       if (data?._rawJun25Samples?.length) {
-        console.info('[Kalshi] JUN25 settlements — disposition of EVERY record:')
+        console.info('[Kalshi] JUN25 bets (one per market+side traded):')
         console.table(data._rawJun25Samples)
-        const dropped = data._rawJun25Samples.filter(s => s.disposition?.startsWith('DROPPED'))
         const total = data._rawJun25Samples.reduce((sum, s) => sum + (typeof s.pnl === 'number' ? s.pnl : 0), 0)
-        console.info(`[Kalshi] JUN25: ${data._rawJun25Samples.length} settlements, ${dropped.length} dropped, net P&L $${total.toFixed(2)}`)
+        console.info(`[Kalshi] JUN25: ${data._rawJun25Samples.length} bets, net P&L $${total.toFixed(2)}`)
       }
       if (data?._rawZeroRevenueSample) {
         const s = data._rawZeroRevenueSample
