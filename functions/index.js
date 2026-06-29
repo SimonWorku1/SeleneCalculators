@@ -523,13 +523,30 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
         const noCount = parseFloat(s.no_count_fp ?? s.no_count ?? 0)
         const yesCount = parseFloat(s.yes_count_fp ?? s.yes_count ?? 0)
         if (!rawFirstNoSideSettlement && noCount > yesCount) rawFirstNoSideSettlement = s
-        // Capture raw data for JUN25-ticker settlements so the console reveals
-        // what market_result / value / revenue fields look like for that game date.
-        if (rawJun25Samples.length < 5 && s.ticker && s.ticker.includes('JUN25')) {
-          rawJun25Samples.push(s)
-        }
 
         const result = await settlementToBet(s, marketCache, keyId, privateKey)
+
+        // Diagnostic: capture EVERY JUN25-ticker settlement with its disposition
+        // (imported as W/L with P&L, or dropped + reason) so we can reconcile
+        // against Pikkit row-by-row and see which markets we silently drop.
+        if (s.ticker && s.ticker.includes('JUN25')) {
+          let disposition, pnl = null
+          if (!result) disposition = 'DROPPED (no net position held to settlement)'
+          else if (result._unknownRevenue) disposition = `DROPPED (unknown outcome: ${result._reason || 'no_winner'})`
+          else {
+            pnl = result.result === 'won' ? +(result.wager * (result.dec - 1)).toFixed(2)
+              : result.result === 'lost' ? -result.wager : 0
+            disposition = `IMPORTED (${result.result}, P&L ${pnl >= 0 ? '+' : ''}${pnl})`
+          }
+          rawJun25Samples.push({
+            ticker: s.ticker,
+            yes_count_fp: s.yes_count_fp, no_count_fp: s.no_count_fp,
+            yes_cost: s.yes_total_cost_dollars, no_cost: s.no_total_cost_dollars,
+            market_result: s.market_result, value: s.value, revenue: s.revenue,
+            disposition, pnl,
+          })
+        }
+
         // settlementToBet returns { _unknownRevenue, _raw, _market } when the
         // outcome cannot be determined — capture a sample and skip the bet.
         if (result?._unknownRevenue) {
@@ -566,6 +583,35 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
   // in its own try so a failure (e.g. a key without these permissions, or a
   // renamed endpoint) is reported but never blocks the core bet sync above.
   const accountErrors = []
+
+  // DIAGNOSTIC: pull fill (trade) history to test the "scalped / exited before
+  // settlement" theory. Settlements only cover contracts held to expiry, so
+  // markets you traded and closed early are invisible there. Fills capture
+  // every trade. We summarize fills for JUN25 markets and return one raw fill
+  // so the exact Kalshi field names are visible. Best-effort; never blocks sync.
+  let rawFirstFill = null
+  const jun25Fills = []
+  let totalFillCount = 0
+  try {
+    await paginate('/portfolio/fills', keyId, privateKey, async (data) => {
+      for (const f of data.fills || []) {
+        totalFillCount++
+        if (!rawFirstFill) rawFirstFill = f
+        if (f.ticker && f.ticker.includes('JUN25')) {
+          jun25Fills.push({
+            ticker: f.ticker, side: f.side, action: f.action,
+            count: f.count ?? f.count_fp,
+            yes_price: f.yes_price, no_price: f.no_price,
+            yes_price_dollars: f.yes_price_dollars, no_price_dollars: f.no_price_dollars,
+            created_time: f.created_time,
+          })
+        }
+      }
+    })
+  } catch (err) {
+    accountErrors.push(`fills: ${err.message}`)
+  }
+
   try {
     // Cash available + total portfolio value (cash + market value of open
     // positions); the at-risk amount is the difference.
@@ -614,6 +660,9 @@ exports.syncKalshi = onCall({ cors: true }, async (request) => {
     _rawFirstNoSideSettlement: rawFirstNoSideSettlement,
     _rawZeroRevenueSample: rawZeroRevenueSample,
     _rawJun25Samples: rawJun25Samples,
+    _rawFirstFill: rawFirstFill,
+    _jun25Fills: jun25Fills,
+    _totalFillCount: totalFillCount,
     _rawBalance: rawBalance,
     _rawFirstDeposit: rawFirstDeposit,
     _rawFirstWithdrawal: rawFirstWithdrawal,
